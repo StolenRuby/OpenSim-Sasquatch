@@ -51,6 +51,7 @@ using System.Collections.Specialized;
 using System.Diagnostics;
 using System.Drawing;
 using System.Globalization;
+using System.Linq;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
@@ -119,6 +120,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
         protected string m_GetWallclockTimeZone = String.Empty;     // Defaults to UTC
         protected double m_timer = Util.GetTimeStampMS();
         protected bool m_waitingForScriptAnswer = false;
+        protected bool m_waitingForScriptExperienceAnswer = false;
         protected bool m_automaticLinkPermission = false;
         protected int m_notecardLineReadCharsMax = 255;
         protected int m_scriptConsoleChannel = 0;
@@ -387,6 +389,88 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             "connection", "content-length", "from", "host", "proxy-authorization",
             "referer", "trailer", "transfer-encoding", "via", "authorization"
         };
+
+        // Experience Stuff
+        bool CheckExperienceAccessAtPos(Vector3 pos, UUID experience)
+        {
+            if (World.ExperienceModule == null)
+                return false;
+
+            if (World.RegionInfo.EstateSettings.KeyExperiences.Contains(experience))
+                return true;
+
+            if (World.RegionInfo.EstateSettings.AllowedExperiences.Contains(experience))
+                return true;
+
+            var land = World.LandChannel.GetLandObject(pos);
+            int idx = land.LandData.ParcelAccessList.FindIndex(
+                            delegate (LandAccessEntry e)
+                            {
+                                // It's not actually an AgentID
+                                if (e.AgentID == experience && (uint)e.Flags == 8u /*AccessList.Allowed*/) // todo: replace with AccessList.Allowed
+                                    return true;
+                                return false;
+                            });
+
+            return idx != -1;
+        }
+
+        private void SendExperienceEvent(ExperienceEvent action)
+        {
+            ScenePresence presence = World.GetScenePresence(m_item.PermsGranter);
+            if (presence != null)
+            {
+                string parcel = World.LandChannel.GetLandObject(m_host.AbsolutePosition).LandData.Name;
+                bool worn = m_host.ParentGroup.AttachmentPoint != 0 && m_host.OwnerID == presence.UUID;
+                presence.ControllingClient.SendGenericMessageForExperience(m_item.ExperienceID, m_item.OwnerID, (int)action, m_host.Name, parcel, worn);
+            }
+        }
+
+        bool CheckExperiencePermissions()
+        {
+            int perms = m_item.PermsMask;
+            if (perms == 408628)
+            {
+                ScenePresence presence = World.GetScenePresence(m_item.PermsGranter);
+                if (presence != null && World.ExperienceModule != null)
+                {
+                    ExperienceInfo info = World.ExperienceModule.GetExperienceInfo(m_item.ExperienceID);
+                    if (info != null)
+                    {
+                        if ((info.properties & (int)(ExperienceFlags.Disabled | ExperienceFlags.Suspended)) == 0)
+                        {
+                            bool allowed_on_land = CheckExperienceAccessAtPos(m_host.AbsolutePosition, m_item.ExperienceID);
+                            bool agent_on_experience_land = CheckExperienceAccessAtPos(presence.AbsolutePosition, m_item.ExperienceID);
+
+                            if (allowed_on_land && agent_on_experience_land)
+                            {
+                                if (World.ExperienceModule.GetExperiencePermission(m_item.PermsGranter, m_item.ExperienceID) == ExperiencePermission.Allowed)
+                                    return true;
+                            }
+                        }
+                    }
+                }
+
+                m_item.PermsGranter = UUID.Zero;
+                m_item.PermsMask = 0;
+            }
+
+            return false;
+        }
+
+
+        // Todo: maybe put this in omv.dll
+        enum ExperienceEvent
+        {
+            TakeControls = 0x1,
+            Animation = 0x3,
+            Attach = 0x4,
+            TrackCamera = 0x9,
+            ControlCamera = 0xA,
+            Teleport = 0xB,
+            Permissions = 0xC,
+            Sit = 0x10
+        }
 
         public void Initialize(IScriptEngine scriptEngine, SceneObjectPart host, TaskInventoryItem item)
         {
@@ -3477,6 +3561,8 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         public void llTakeControls(int controls, int accept, int pass_on)
         {
+            bool is_experience = CheckExperiencePermissions();
+
             if (!m_item.PermsGranter.IsZero())
             {
                 ScenePresence presence = World.GetScenePresence(m_item.PermsGranter);
@@ -3485,6 +3571,11 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 {
                     if ((m_item.PermsMask & ScriptBaseClass.PERMISSION_TAKE_CONTROLS) != 0)
                     {
+                        if (is_experience)
+                        {
+                            SendExperienceEvent(ExperienceEvent.TakeControls);
+                        }
+
                         presence.RegisterControlEventsToScript(controls, accept, pass_on, m_host.LocalId, m_item.ItemID);
                     }
                 }
@@ -3494,6 +3585,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         public void llReleaseControls()
         {
+            bool is_experience = CheckExperiencePermissions();
 
             if (!m_item.PermsGranter.IsZero())
             {
@@ -3524,15 +3616,20 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
         /// The attachment point (e.g. <see cref="OpenSim.Region.ScriptEngine.Shared.ScriptBase.ScriptBaseClass.ATTACH_CHEST">ATTACH_CHEST</see>)
         /// </param>
         /// <returns>true if the attach suceeded, false if it did not</returns>
-        public bool AttachToAvatar(int attachmentPoint)
+        public bool AttachToAvatar(int attachmentPoint, bool experience = false)
         {
             SceneObjectGroup grp = m_host.ParentGroup;
             ScenePresence presence = World.GetScenePresence(m_host.OwnerID);
 
+            if (experience)
+            { // todo: im pretty sure the experience id should be getting saved here
+                SendExperienceEvent(ExperienceEvent.Attach);
+            }
+
             IAttachmentsModule attachmentsModule = m_ScriptEngine.World.AttachmentsModule;
 
             if (attachmentsModule != null)
-                return attachmentsModule.AttachObject(presence, grp, (uint)attachmentPoint, false, true, true);
+                return attachmentsModule.AttachObject(presence, grp, (uint)attachmentPoint, false, true, true, UUID.Zero);
             else
                 return false;
         }
@@ -3560,6 +3657,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         public void llAttachToAvatar(LSL_Integer attachmentPoint)
         {
+            bool is_experience = CheckExperiencePermissions();
 
             if (m_item.PermsGranter != m_host.OwnerID)
                 return;
@@ -3569,7 +3667,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 return;
 
             if ((m_item.PermsMask & ScriptBaseClass.PERMISSION_ATTACH) != 0)
-                AttachToAvatar(attachmentPoint);
+                AttachToAvatar(attachmentPoint, is_experience);
         }
 
         public void llAttachToAvatarTemp(LSL_Integer attachmentPoint)
@@ -3577,6 +3675,8 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             IAttachmentsModule attachmentsModule = World.RequestModuleInterface<IAttachmentsModule>();
             if (attachmentsModule == null)
                 return;
+
+            bool is_experience = CheckExperiencePermissions();
 
             if ((m_item.PermsMask & ScriptBaseClass.PERMISSION_ATTACH) == 0)
                 return;
@@ -3621,7 +3721,12 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 grp.RootPart.ScheduleFullUpdate();
             }
 
-            attachmentsModule.AttachObject(target, grp, (uint)attachmentPoint, false, false, true);
+            if (is_experience)
+            {
+                SendExperienceEvent(ExperienceEvent.Attach);
+            }
+
+            attachmentsModule.AttachObject(target, grp, (uint)attachmentPoint, false, false, true, is_experience ? m_item.ExperienceID : UUID.Zero);
         }
 
     public void llDetachFromAvatar()
@@ -3629,6 +3734,8 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
             if (m_host.ParentGroup.AttachmentPoint == 0)
                 return;
+
+            bool is_experience = CheckExperiencePermissions();
 
             if (m_item.PermsGranter != m_host.OwnerID)
                 return;
@@ -3887,6 +3994,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         public void llStartAnimation(string anim)
         {
+            bool is_experience = CheckExperiencePermissions();
 
             if (m_item.PermsGranter.IsZero())
                 return;
@@ -3897,6 +4005,11 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
                 if (presence is not null)
                 {
+                    if (is_experience)
+                    {
+                        SendExperienceEvent(ExperienceEvent.Animation);
+                    }
+
                     // Do NOT try to parse UUID, animations cannot be triggered by ID
                     UUID animID = ScriptUtils.GetAssetIdFromItemName(m_host, anim, (int)AssetType.Animation);
                     if (animID.IsZero())
@@ -3909,6 +4022,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         public void llStopAnimation(string anim)
         {
+            bool is_experience = CheckExperiencePermissions();
 
             if (m_item.PermsGranter.IsZero())
                 return;
@@ -3919,6 +4033,11 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
                 if (presence is not null)
                 {
+                    if (is_experience)
+                    {
+                        SendExperienceEvent(ExperienceEvent.Animation);
+                    }
+
                     UUID animID = ScriptUtils.GetAssetIdFromKeyOrItemName(m_host, anim);
                     if (animID.IsNotZero())
                         presence.Animator.RemoveAnimation(animID, true);
@@ -4102,7 +4221,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 }
 
                 presence.ControllingClient.SendScriptQuestion(
-                    m_host.UUID, m_host.ParentGroup.RootPart.Name, ownerName, m_item.ItemID, perm);
+                    m_host.UUID, m_host.ParentGroup.RootPart.Name, ownerName, m_item.ItemID, perm, UUID.Zero);
 
                 return;
             }
@@ -4136,13 +4255,13 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         public LSL_Key llGetPermissionsKey()
         {
-
+            bool is_experience = CheckExperiencePermissions();
             return m_item.PermsGranter.ToString();
         }
 
         public LSL_Integer llGetPermissions()
         {
-
+            bool is_experience = CheckExperiencePermissions();
             int perms = m_item.PermsMask;
 
             if (m_automaticLinkPermission)
@@ -4841,6 +4960,10 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 if (presence == null || presence.IsDeleted || presence.IsChildAgent || presence.IsNPC || presence.IsSatOnObject || presence.IsInTransit)
                     return;
 
+                bool is_experience = CheckExperiencePermissions();
+
+                // todo: come back to this
+
                 if (m_item.PermsGranter.Equals(agentId))
                 {
                     if ((m_item.PermsMask & ScriptBaseClass.PERMISSION_TELEPORT) != 0)
@@ -4874,6 +4997,9 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         public void llTeleportAgentGlobalCoords(string agent, LSL_Vector global_coords, LSL_Vector targetPos, LSL_Vector targetLookAt)
         {
+            bool is_experience = CheckExperiencePermissions();
+            // todo: come back to this
+
             // If attached using llAttachToAvatarTemp, cowardly refuse
             if (m_host.ParentGroup.AttachmentPoint != 0 && m_host.ParentGroup.FromItemID.IsZero())
                 return;
@@ -10140,7 +10266,38 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                                 SitTarget(part, Vector3.Zero , Quaternion.Identity);
 
                             break;
+                        case ScriptBaseClass.PRIM_ALLOW_UNSIT:
+                            if (remain < 1)
+                                return new LSL_List();
+                            bool allow;
+                            try
+                            {
+                                allow = rules.GetLSLIntegerItem(idx++) == 1;
+                            }
+                            catch (InvalidCastException)
+                            {
+                                Error(originFunc, string.Format("Error running rule #{0} -> PRIM_ALLOW_UNSIT: arg #{1} - parameter 2 must be an integer", rulesParsed, idx - idxStart - 1));
+                                return new LSL_List();
+                            }
 
+                            part.AllowUnsit = allow;
+                            break;
+                        case ScriptBaseClass.PRIM_SCRIPTED_SIT_ONLY:
+                            if (remain < 1)
+                                return new LSL_List();
+                            bool script_only;
+                            try
+                            {
+                                script_only = rules.GetLSLIntegerItem(idx++) == 1;
+                            }
+                            catch (InvalidCastException)
+                            {
+                                Error(originFunc, string.Format("Error running rule #{0} -> PRIM_SCRIPTED_SIT_ONLY: arg #{1} - parameter 2 must be an integer", rulesParsed, idx - idxStart - 1));
+                                return new LSL_List();
+                            }
+
+                            part.ScriptedSitOnly = script_only;
+                            break;
                         case ScriptBaseClass.PRIM_ALPHA_MODE:
                             if (remain < 3)
                                 return new LSL_List();
@@ -13305,6 +13462,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         public LSL_Vector llGetCameraPos()
         {
+            bool is_experience = CheckExperiencePermissions();
 
             if (m_item.PermsGranter.IsZero())
                 return LSL_Vector.Zero;
@@ -13317,13 +13475,21 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
             ScenePresence presence = World.GetScenePresence(m_item.PermsGranter);
             if (presence is not null)
+            {
+                if (is_experience)
+                {
+                    SendExperienceEvent(ExperienceEvent.TrackCamera);
+                }
+
                 return new LSL_Vector(presence.CameraPosition);
+            }
 
             return LSL_Vector.Zero;
         }
 
         public LSL_Rotation llGetCameraRot()
         {
+            bool is_experience = CheckExperiencePermissions();
 
             if (m_item.PermsGranter.IsZero())
                 return LSL_Rotation.Identity;
@@ -13337,6 +13503,11 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             ScenePresence presence = World.GetScenePresence(m_item.PermsGranter);
             if (presence is not null)
             {
+                if (is_experience)
+                {
+                    SendExperienceEvent(ExperienceEvent.TrackCamera);
+                }
+
                 return new LSL_Rotation(presence.CameraRotation);
             }
 
@@ -13528,6 +13699,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         public void llSetCameraParams(LSL_List rules)
         {
+            bool is_experience = CheckExperiencePermissions();
 
             // the object we are in
             UUID objectID = m_host.ParentUUID;
@@ -13649,11 +13821,21 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                     break;
                 }
             }
-            if (parameters.Count > 0) presence.ControllingClient.SendSetFollowCamProperties(objectID, parameters);
+
+            if (parameters.Count > 0)
+            {
+                if (is_experience)
+                {
+                    SendExperienceEvent(ExperienceEvent.ControlCamera);
+                }
+
+                presence.ControllingClient.SendSetFollowCamProperties(objectID, parameters);
+            }
         }
 
         public void llClearCameraParams()
         {
+            bool is_experience = CheckExperiencePermissions();
 
             // the object we are in
             UUID objectID = m_host.ParentUUID;
@@ -17390,6 +17572,8 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         public void llSetAnimationOverride(LSL_String animState, LSL_String anim)
         {
+            bool is_experience = CheckExperiencePermissions();
+
             if (m_item.PermsGranter.IsZero())
             {
                 llShout(ScriptBaseClass.DEBUG_CHANNEL, "No permission to override animations");
@@ -17445,6 +17629,8 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         public void llResetAnimationOverride(LSL_String animState)
         {
+            bool is_experience = CheckExperiencePermissions();
+
             ScenePresence presence = World.GetScenePresence(m_item.PermsGranter);
             if (presence == null)
                 return;
@@ -17488,6 +17674,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         public LSL_String llGetAnimationOverride(LSL_String animState)
         {
+            bool is_experience = CheckExperiencePermissions();
 
             ScenePresence presence = World.GetScenePresence(m_item.PermsGranter);
             if (presence is null)
@@ -17645,6 +17832,600 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
             float z = m_host.GetWorldPosition().Z;
             return m_envModule.GetRegionMoonRot(z);
+        }
+
+
+        public void llRequestExperiencePermissions(string agent, string unused)
+        {
+            UUID agentID;
+
+            if (!UUID.TryParse(agent, out agentID))
+                return;
+
+            if (agentID == UUID.Zero) // Releasing permissions
+            {
+                llReleaseControls();
+
+                m_item.PermsGranter = UUID.Zero;
+                m_item.PermsMask = 0;
+
+                return;
+            }
+
+            if (m_item.PermsGranter != agentID)
+                llReleaseControls();
+
+            if (World.ExperienceModule == null)
+            {
+                m_ScriptEngine.PostScriptEvent(m_item.ItemID, new EventParams(
+                        "experience_permissions_denied", new Object[] {
+                                new LSL_Key(agentID.ToString()),
+                                new LSL_Integer(ScriptBaseClass.XP_ERROR_EXPERIENCES_DISABLED)},
+                                        new DetectParams[0]));
+                return;
+            }
+
+            ScenePresence presence = World.GetScenePresence(agentID);
+
+            if (presence != null)
+            {
+                UUID experience_key = m_item.ExperienceID;
+                if (experience_key == UUID.Zero || World.ExperienceModule == null)
+                {
+                    m_ScriptEngine.PostScriptEvent(m_item.ItemID, new EventParams(
+                            "experience_permissions_denied", new Object[] {
+                                    new LSL_Key(agentID.ToString()),
+                                    new LSL_Integer(ScriptBaseClass.XP_ERROR_NO_EXPERIENCE)},
+                                            new DetectParams[0]));
+                    return;
+                }
+
+                ExperienceInfo experienceInfo = World.ExperienceModule.GetExperienceInfo(experience_key);
+
+                if ((experienceInfo.properties & (int)ExperienceFlags.Disabled) != 0)
+                {
+                    m_ScriptEngine.PostScriptEvent(m_item.ItemID, new EventParams(
+                            "experience_permissions_denied", new Object[] {
+                                    new LSL_Key(agentID.ToString()),
+                                    new LSL_Integer(ScriptBaseClass.XP_ERROR_EXPERIENCE_DISABLED)},
+                                            new DetectParams[0]));
+                    return;
+                }
+                else if ((experienceInfo.properties & (int)ExperienceFlags.Suspended) != 0)
+                {
+                    m_ScriptEngine.PostScriptEvent(m_item.ItemID, new EventParams(
+                            "experience_permissions_denied", new Object[] {
+                                    new LSL_Key(agentID.ToString()),
+                                    new LSL_Integer(ScriptBaseClass.XP_ERROR_EXPERIENCE_SUSPENDED)},
+                                            new DetectParams[0]));
+                    return;
+                }
+
+                bool agent_in_experience = CheckExperienceAccessAtPos(presence.AbsolutePosition, m_item.ExperienceID);
+                bool experience_allowed_here = CheckExperienceAccessAtPos(m_host.AbsolutePosition, m_item.ExperienceID);
+
+                if (!agent_in_experience || !experience_allowed_here)
+                {
+                    m_ScriptEngine.PostScriptEvent(m_item.ItemID, new EventParams(
+                            "experience_permissions_denied", new Object[] {
+                                    new LSL_Key(agentID.ToString()),
+                                    new LSL_Integer(ScriptBaseClass.XP_ERROR_NOT_PERMITTED_LAND)},
+                                            new DetectParams[0]));
+                    return;
+                }
+
+                ExperiencePermission experiencePermission = World.ExperienceModule.GetExperiencePermission(agentID, experience_key);
+                if (experiencePermission == ExperiencePermission.Allowed)
+                {
+                    SendExperienceEvent(ExperienceEvent.Permissions);
+
+                    m_host.TaskInventory.LockItemsForWrite(true);
+                    m_host.TaskInventory[m_item.ItemID].PermsGranter = agentID;
+                    m_host.TaskInventory[m_item.ItemID].PermsMask = 408628;
+                    m_host.TaskInventory.LockItemsForWrite(false);
+
+                    m_ScriptEngine.PostScriptEvent(m_item.ItemID, new EventParams(
+                            "experience_permissions", new Object[] {
+                            new LSL_Key(agentID.ToString()) },
+                                            new DetectParams[0]));
+                    return;
+                }
+                else if (experiencePermission == ExperiencePermission.Allowed)
+                {
+                    m_ScriptEngine.PostScriptEvent(m_item.ItemID, new EventParams(
+                            "experience_permissions_denied", new Object[] {
+                            new LSL_Key(agentID.ToString()),
+                            new LSL_Integer(ScriptBaseClass.XP_ERROR_NOT_PERMITTED)},
+                                            new DetectParams[0]));
+                    return;
+                }
+                else
+                {
+                    string ownerName = resolveName(m_host.ParentGroup.RootPart.OwnerID);
+                    if (ownerName == String.Empty)
+                        ownerName = "(hippos)";
+
+                    if (!m_waitingForScriptExperienceAnswer)
+                    {
+                        presence.ControllingClient.OnScriptAnswer += handleScriptExperienceAnswer;
+                        m_waitingForScriptExperienceAnswer = true;
+                    }
+
+                    // todo: decode: 408628
+
+                    presence.ControllingClient.SendScriptQuestion(
+                        m_host.UUID, m_host.ParentGroup.RootPart.Name, ownerName, m_item.ItemID, 408628, m_item.ExperienceID);
+                }
+            }
+            else Error("llRequestExperiencePermissions", "Unable to find specified agent to request experience permissions.");
+        }
+
+        void handleScriptExperienceAnswer(IClientAPI client, UUID taskID, UUID itemID, int answer)
+        {
+            if (taskID != m_host.UUID)
+                return;
+
+            client.OnScriptAnswer -= handleScriptExperienceAnswer;
+            m_waitingForScriptExperienceAnswer = false;
+
+            m_log.InfoFormat("[EXPERIENCE] Script answer from {0} is {1}", client.AgentId, answer);
+
+            if ((answer & ScriptBaseClass.PERMISSION_TAKE_CONTROLS) == 0)
+                llReleaseControls();
+
+            m_host.TaskInventory.LockItemsForWrite(true);
+
+            if (answer != 0)
+            {
+                m_log.InfoFormat("[EXPERIENCE] Permissions granted by {0} to {1}", client.AgentId, m_item.ExperienceID);
+
+                World.ExperienceModule.SetExperiencePermission(client.AgentId, m_item.ExperienceID, ExperiencePermission.Allowed);
+                SendExperienceEvent(ExperienceEvent.Permissions);
+
+                m_host.TaskInventory[m_item.ItemID].PermsMask = 408628;
+                m_host.TaskInventory[m_item.ItemID].PermsGranter = client.AgentId;
+
+                m_ScriptEngine.PostScriptEvent(m_item.ItemID, new EventParams(
+                    "experience_permissions", new Object[] {
+                        new LSL_Key(client.AgentId.ToString()) },
+                        new DetectParams[0]));
+            }
+            else
+            {
+                m_host.TaskInventory[m_item.ItemID].PermsMask = 0;
+                m_host.TaskInventory[m_item.ItemID].PermsGranter = UUID.Zero;
+
+                m_ScriptEngine.PostScriptEvent(m_item.ItemID, new EventParams(
+                    "experience_permissions_denied", new Object[] {
+                        new LSL_Key(client.AgentId.ToString()),
+                        new LSL_Integer(ScriptBaseClass.XP_ERROR_NOT_PERMITTED)},
+                        new DetectParams[0]));
+            }
+
+            m_host.TaskInventory.LockItemsForWrite(false);
+        }
+
+        public LSL_Integer llAgentInExperience(string agent)
+        {
+            if (World.ExperienceModule == null)
+                return new LSL_Integer(0);
+
+            UUID agentID;
+
+            if (!UUID.TryParse(agent, out agentID))
+                return new LSL_Integer(0);
+
+            if (m_item.ExperienceID == UUID.Zero)
+                return new LSL_Integer(0);
+
+            ScenePresence presence = World.GetScenePresence(agentID);
+
+            if (presence != null)
+            {
+                bool is_allowed = CheckExperienceAccessAtPos(presence.AbsolutePosition, m_item.ExperienceID);
+
+                if (is_allowed)
+                {
+                    ExperiencePermission experiencePermission = World.ExperienceModule.GetExperiencePermission(agentID, m_item.ExperienceID);
+                    is_allowed = experiencePermission == ExperiencePermission.Allowed;
+                }
+
+                return new LSL_Integer(is_allowed ? 1 : 0);
+            }
+
+            return new LSL_Integer(0);
+        }
+
+        public LSL_List llGetExperienceDetails(string experience_key)
+        {
+            if (World.ExperienceModule == null)
+                return new LSL_List();
+
+            UUID experienceID;
+
+            if (!UUID.TryParse(experience_key, out experienceID))
+                return new LSL_List();
+
+            if (experienceID == UUID.Zero)
+                experienceID = m_item.ExperienceID;
+
+            if (experienceID == UUID.Zero)
+                return new LSL_List();
+
+            ExperienceInfo info = World.ExperienceModule.GetExperienceInfo(experienceID);
+            if (info != null)
+            {
+                int state = 0;
+                string state_message = "no error";
+
+                if ((info.properties & (int)ExperienceFlags.Disabled) != 0)
+                {
+                    state = ScriptBaseClass.XP_ERROR_EXPERIENCE_DISABLED;
+                    state_message = "experience is disabled";
+                }
+                else if ((info.properties & (int)ExperienceFlags.Suspended) != 0)
+                {
+                    state = ScriptBaseClass.XP_ERROR_EXPERIENCE_SUSPENDED;
+                    state_message = "experience is suspended";
+                }
+                else if (!CheckExperienceAccessAtPos(m_host.AbsolutePosition, experienceID))
+                {
+                    state = ScriptBaseClass.XP_ERROR_NOT_PERMITTED_LAND;
+                    state_message = "not allowed to run on this land";
+                }
+
+                return new LSL_List(new object[] {
+                    new LSL_String(info.name),
+                    new LSL_Key(info.owner_id.ToString()),
+                    new LSL_Key(info.public_id.ToString()),
+                    new LSL_Integer(state),
+                    new LSL_String(state_message),
+                    new LSL_Key(info.group_id.ToString())
+                });
+            }
+            return new LSL_List();
+        }
+
+        public LSL_String llGetExperienceErrorMessage(LSL_Integer error)
+        {
+            string error_str = "";
+            if (error == 0)
+                error_str = "no error";
+            else if (error == 1)
+                error_str = "exceeded throttle";
+            else if (error == 2)
+                error_str = "experiences are disabled";
+            else if (error == 3)
+                error_str = "invalid parameters";
+            else if (error == 4)
+                error_str = "operation not permitted";
+            else if (error == 5)
+                error_str = "script not associated with an experience";
+            else if (error == 6)
+                error_str = "not found";
+            else if (error == 7)
+                error_str = "invalid experience";
+            else if (error == 8)
+                error_str = "experience is disabled";
+            else if (error == 9)
+                error_str = "experience is suspended";
+            else if (error == 10)
+                error_str = "unknown error";
+            else if (error == 11)
+                error_str = "experience data quota exceeded";
+            else if (error == 12)
+                error_str = "key-value store is disabled";
+            else if (error == 13)
+                error_str = "key-value store communication failed";
+            else if (error == 14)
+                error_str = "key doesn't exist";
+            else if (error == 15)
+                error_str = "retry update";
+            else if (error == 16)
+                error_str = "experience content rating too high";
+            else if (error == 17)
+                error_str = "not allowed to run on this land";
+            else if (error == 18)
+                error_str = "experience permissions request timed out";
+            return new LSL_String(error_str);
+        }
+
+        public LSL_Integer llSitOnLink(string agent, LSL_Integer link)
+        {
+            if (World.ExperienceModule == null)
+                return new LSL_Integer();
+
+            if (m_item.ExperienceID == UUID.Zero)
+                return new LSL_Integer(ScriptBaseClass.SIT_NOT_EXPERIENCE);
+
+
+            UUID agent_id;
+            if (!UUID.TryParse(agent, out agent_id))
+                return new LSL_Integer(ScriptBaseClass.SIT_INVALID_AGENT);
+
+            ScenePresence presence = World.GetScenePresence(agent_id);
+
+            //todo: banlines? SIT_NO_ACCESS
+
+            if (presence != null)
+            {
+                if (!CheckExperienceAccessAtPos(m_host.AbsolutePosition, m_item.ExperienceID))
+                    return new LSL_Integer(ScriptBaseClass.SIT_NOT_EXPERIENCE);
+
+                if (!CheckExperienceAccessAtPos(presence.AbsolutePosition, m_item.ExperienceID))
+                    return new LSL_Integer(ScriptBaseClass.SIT_NOT_EXPERIENCE);
+
+                if (World.ExperienceModule.GetExperiencePermission(agent_id, m_item.ExperienceID) != ExperiencePermission.Allowed)
+                {
+                    return new LSL_Integer(ScriptBaseClass.SIT_NO_EXPERIENCE_PERMISSION);
+                }
+
+                SceneObjectPart part;
+                if (link == ScriptBaseClass.LINK_THIS)
+                    part = m_host;
+                else if (link == ScriptBaseClass.LINK_ROOT)
+                    part = m_host.ParentGroup.RootPart;
+                else
+                    part = m_host.ParentGroup.GetLinkNumPart(link);
+
+                if (part == null)
+                    return new LSL_Integer(ScriptBaseClass.SIT_INVALID_LINK);
+
+                if (part.ParentGroup.IsAttachment)
+                    return new LSL_Integer(ScriptBaseClass.SIT_INVALID_OBJECT);
+
+                if (part.SitTargetOrientationLL == Quaternion.Identity && part.SitTargetPosition == Vector3.Zero)
+                    return new LSL_Integer(ScriptBaseClass.SIT_NO_SIT_TARGET);
+
+                if (part.SitTargetAvatar != UUID.Zero)
+                    return new LSL_Integer(ScriptBaseClass.SIT_NO_SIT_TARGET);
+
+                presence.ScriptedSit(part, agent_id, m_item.ExperienceID);
+
+                return new LSL_Integer(1);
+            }
+            else return new LSL_Integer(ScriptBaseClass.SIT_INVALID_AGENT);
+        }
+
+        public LSL_Key llCreateKeyValue(string key, string value)
+        {
+            Action<string> act = eventID =>
+            {
+                string response;
+
+                if (m_item.ExperienceID != UUID.Zero)
+                {
+                    if (CheckExperienceAccessAtPos(m_host.AbsolutePosition, m_item.ExperienceID))
+                    {
+                        string create = World.ExperienceModule.CreateKeyValue(m_item.ExperienceID, key, value);
+                        if (create == "success")
+                            response = string.Format("1,{0}", value);
+                        else if (create == "exists")
+                            response = string.Format("0,{0}", ScriptBaseClass.XP_ERROR_STORAGE_EXCEPTION);
+                        else if (create == "full")
+                            response = string.Format("0,{0}", ScriptBaseClass.XP_ERROR_QUOTA_EXCEEDED);
+                        else
+                            response = string.Format("0,{0}", ScriptBaseClass.XP_ERROR_UNKNOWN_ERROR);
+                    }
+                    else
+                    {
+                        response = string.Format("0,{0}", ScriptBaseClass.XP_ERROR_NOT_PERMITTED_LAND);
+                    }
+                }
+                else
+                {
+                    response = string.Format("0,{0}", ScriptBaseClass.XP_ERROR_NO_EXPERIENCE);
+                }
+
+                m_AsyncCommands.DataserverPlugin.DataserverReply(eventID, response);
+            };
+
+            UUID rq = m_AsyncCommands.DataserverPlugin.RegisterRequest(m_host.LocalId, m_item.ItemID, act);
+            return rq.ToString();
+        }
+
+        public LSL_Key llDeleteKeyValue(string key)
+        {
+            Action<string> act = eventID =>
+            {
+                string response;
+
+                if (m_item.ExperienceID != UUID.Zero)
+                {
+                    if (CheckExperienceAccessAtPos(m_host.AbsolutePosition, m_item.ExperienceID))
+                    {
+                        string delete = World.ExperienceModule.DeleteKey(m_item.ExperienceID, key);
+                        if (delete == "success")
+                            response = "1,delete";
+                        else if (delete == "missing")
+                            response = string.Format("0,{0}", ScriptBaseClass.XP_ERROR_STORAGE_EXCEPTION);
+                        else
+                            response = string.Format("0,{0}", ScriptBaseClass.XP_ERROR_UNKNOWN_ERROR);
+                    }
+                    else
+                    {
+                        response = string.Format("0,{0}", ScriptBaseClass.XP_ERROR_NOT_PERMITTED_LAND);
+                    }
+                }
+                else
+                {
+                    response = string.Format("0,{0}", ScriptBaseClass.XP_ERROR_NO_EXPERIENCE);
+                }
+
+                m_AsyncCommands.DataserverPlugin.DataserverReply(eventID, response);
+            };
+
+            UUID rq = m_AsyncCommands.DataserverPlugin.RegisterRequest(m_host.LocalId, m_item.ItemID, act);
+            return rq.ToString();
+        }
+
+        public LSL_Key llReadKeyValue(string key)
+        {
+            Action<string> act = eventID =>
+            {
+                string response;
+
+                if (m_item.ExperienceID != UUID.Zero)
+                {
+                    if (CheckExperienceAccessAtPos(m_host.AbsolutePosition, m_item.ExperienceID))
+                    {
+                        string get = World.ExperienceModule.GetKeyValue(m_item.ExperienceID, key);
+                        if (get == null)
+                            response = string.Format("0,{0}", ScriptBaseClass.XP_ERROR_KEY_NOT_FOUND);
+                        else
+                            response = "1," + get;
+                    }
+                    else
+                    {
+                        response = string.Format("0,{0}", ScriptBaseClass.XP_ERROR_NOT_PERMITTED_LAND);
+                    }
+                }
+                else
+                {
+                    response = string.Format("0,{0}", ScriptBaseClass.XP_ERROR_NO_EXPERIENCE);
+                }
+
+                m_AsyncCommands.DataserverPlugin.DataserverReply(eventID, response);
+            };
+
+            UUID rq = m_AsyncCommands.DataserverPlugin.RegisterRequest(m_host.LocalId, m_item.ItemID, act);
+            return rq.ToString();
+        }
+
+        public LSL_Key llUpdateKeyValue(string key, string value, LSL_Integer check, string original)
+        {
+            Action<string> act = eventID =>
+            {
+                string response;
+
+                if (m_item.ExperienceID != UUID.Zero)
+                {
+                    if (CheckExperienceAccessAtPos(m_host.AbsolutePosition, m_item.ExperienceID))
+                    {
+                        bool do_check = check == 1;
+                        string update = World.ExperienceModule.UpdateKeyValue(m_item.ExperienceID, key, value, do_check, original);
+                        if (update == "success")
+                            response = "1," + value;
+                        else if (update == "mismatch")
+                            response = string.Format("0,{0}", ScriptBaseClass.XP_ERROR_RETRY_UPDATE);
+                        else if (update == "missing")
+                            response = string.Format("0,{0}", ScriptBaseClass.XP_ERROR_KEY_NOT_FOUND);
+                        else if (update == "full")
+                            response = string.Format("0,{0}", ScriptBaseClass.XP_ERROR_QUOTA_EXCEEDED);
+                        else
+                            response = string.Format("0,{0}", ScriptBaseClass.XP_ERROR_UNKNOWN_ERROR);
+                    }
+                    else
+                    {
+                        response = string.Format("0,{0}", ScriptBaseClass.XP_ERROR_NOT_PERMITTED_LAND);
+                    }
+                }
+                else
+                {
+                    response = string.Format("0,{0}", ScriptBaseClass.XP_ERROR_NO_EXPERIENCE);
+                }
+
+                m_AsyncCommands.DataserverPlugin.DataserverReply(eventID, response);
+            };
+
+            UUID rq = m_AsyncCommands.DataserverPlugin.RegisterRequest(m_host.LocalId, m_item.ItemID, act);
+            return rq.ToString();
+        }
+
+        public LSL_Key llKeyCountKeyValue()
+        {
+            Action<string> act = eventID =>
+            {
+                string response;
+
+                if (m_item.ExperienceID != UUID.Zero)
+                {
+                    if (CheckExperienceAccessAtPos(m_host.AbsolutePosition, m_item.ExperienceID))
+                    {
+                        int count = World.ExperienceModule.GetKeyCount(m_item.ExperienceID);
+                        response = string.Format("1,{0}", count);
+                    }
+                    else
+                    {
+                        response = string.Format("0,{0}", ScriptBaseClass.XP_ERROR_NOT_PERMITTED_LAND);
+                    }
+                }
+                else
+                {
+                    response = string.Format("0,{0}", ScriptBaseClass.XP_ERROR_NO_EXPERIENCE);
+                }
+
+                m_AsyncCommands.DataserverPlugin.DataserverReply(eventID, response);
+            };
+
+            UUID rq = m_AsyncCommands.DataserverPlugin.RegisterRequest(m_host.LocalId, m_item.ItemID, act);
+            return rq.ToString();
+        }
+
+        public LSL_Key llKeysKeyValue(LSL_Integer first, LSL_Integer count)
+        {
+            Action<string> act = eventID =>
+            {
+                string response;
+
+                if (m_item.ExperienceID != UUID.Zero)
+                {
+                    if (CheckExperienceAccessAtPos(m_host.AbsolutePosition, m_item.ExperienceID))
+                    {
+                        string[] keys = World.ExperienceModule.GetKeys(m_item.ExperienceID, first, count);
+                        if (keys.Length > 0)
+                            response = string.Format("1,{0}", string.Join(",", keys));
+                        else
+                            response = string.Format("0,{0}", ScriptBaseClass.XP_ERROR_KEY_NOT_FOUND);
+                    }
+                    else
+                    {
+                        response = string.Format("0,{0}", ScriptBaseClass.XP_ERROR_NOT_PERMITTED_LAND);
+                    }
+                }
+                else
+                {
+                    response = string.Format("0,{0}", ScriptBaseClass.XP_ERROR_NO_EXPERIENCE);
+                }
+
+                m_AsyncCommands.DataserverPlugin.DataserverReply(eventID, response);
+            };
+
+            UUID rq = m_AsyncCommands.DataserverPlugin.RegisterRequest(m_host.LocalId, m_item.ItemID, act);
+            return rq.ToString();
+        }
+
+        public LSL_Key llDataSizeKeyValue()
+        {
+            Action<string> act = eventID =>
+            {
+                string response;
+
+                if (m_item.ExperienceID != UUID.Zero)
+                {
+                    if (CheckExperienceAccessAtPos(m_host.AbsolutePosition, m_item.ExperienceID))
+                    {
+                        int used = World.ExperienceModule.GetSize(m_item.ExperienceID);
+                        var info = World.ExperienceModule.GetExperienceInfo(m_item.ExperienceID);
+
+                        int max = 1024 * 1024 * info.quota;
+                        response = string.Format("1,{0},{1}", used, max);
+                    }
+                    else
+                    {
+                        response = string.Format("0,{0}", ScriptBaseClass.XP_ERROR_NOT_PERMITTED_LAND);
+                    }
+                }
+                else
+                {
+                    response = string.Format("0,{0}", ScriptBaseClass.XP_ERROR_NO_EXPERIENCE);
+                }
+
+                m_AsyncCommands.DataserverPlugin.DataserverReply(eventID, response);
+            };
+
+            UUID rq = m_AsyncCommands.DataserverPlugin.RegisterRequest(m_host.LocalId, m_item.ItemID, act);
+            return rq.ToString();
         }
 
         public LSL_List llJson2List(LSL_String json)

@@ -522,5 +522,18 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api.Interfaces
       LSL_Integer llLinksetDataDeleteProtected(LSL_String name, LSL_String pass);
 
       LSL_Integer llIsFriend(LSL_Key agent_id);
-   }
+
+      void llRequestExperiencePermissions(string agent_id, string unused);
+      LSL_Integer llAgentInExperience(string agent_id);
+      LSL_List llGetExperienceDetails(string experience_key);
+      LSL_String llGetExperienceErrorMessage(LSL_Integer error);
+      LSL_Integer llSitOnLink(string agent_id, LSL_Integer link);
+      LSL_Key llCreateKeyValue(string key, string value);
+      LSL_Key llDeleteKeyValue(string key);
+      LSL_Key llReadKeyValue(string key);
+      LSL_Key llUpdateKeyValue(string key, string value, LSL_Integer check, string original);
+      LSL_Key llKeyCountKeyValue();
+      LSL_Key llKeysKeyValue(LSL_Integer first, LSL_Integer count);
+      LSL_Key llDataSizeKeyValue();
+    }
 }
