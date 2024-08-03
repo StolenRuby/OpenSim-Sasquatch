@@ -535,5 +535,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api.Interfaces
       LSL_Key llKeyCountKeyValue();
       LSL_Key llKeysKeyValue(LSL_Integer first, LSL_Integer count);
       LSL_Key llDataSizeKeyValue();
+      LSL_Integer llSetAgentEnvironment(LSL_Key agent_id, LSL_Float transition, LSL_List param_list);
+      LSL_Integer llReplaceAgentEnvironment(LSL_Key agent_id, LSL_Float transition, LSL_String environment);
     }
 }
