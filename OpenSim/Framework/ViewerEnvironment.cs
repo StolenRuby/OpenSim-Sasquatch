@@ -84,11 +84,19 @@ namespace OpenSim.Framework
  
         public float[] Altitudes = new float[3] {1000f, 2000f, 3000f };
 
+        public string WaterName = null;
+        public string GroundName = null;
+        public string[] AltitudeNames = new string[3];
+
+        public UUID FromAssetID = UUID.Zero;
+
         //DayHash;
         public bool IsLegacy = false;
         public string DayCycleName;
 
         public int version = 0;
+
+        public EEPOverrides Overrides = new EEPOverrides();
 
         public void FromWLOSD(OSD osd)
         {
@@ -325,6 +333,8 @@ namespace OpenSim.Framework
 
             Cycle ??= new DayCycle();
 
+            if (map.TryGetValue("day_asset", out otmp))
+                FromAssetID = otmp;
             if (map.TryGetValue("day_length", out otmp))
                 DayLength = otmp;
             if (map.TryGetValue("day_offset", out otmp))
@@ -344,6 +354,36 @@ namespace OpenSim.Framework
                     Altitudes[i] = alt[i];
 
                 SortAltitudes();
+            }
+
+            if (map.TryGetValue("day_names", out otmp))
+            {
+                if(otmp is OSDString)
+                {
+                    DayCycleName = otmp;
+                    WaterName = otmp;
+                    GroundName = otmp;
+                }
+                else if(otmp is OSDArray)
+                {
+                    OSDArray names = otmp as OSDArray;
+
+                    if (names.Count > 2)
+                    {
+                        WaterName = names[0];
+                        GroundName = names[1];
+
+                        for (int i = 2; i < names.Count; i++)
+                        {
+                            AltitudeNames[i - 2] = names[i];
+                        }
+                    }
+                }
+            }
+
+            if(map.TryGetValue("overrides", out otmp) && otmp is OSDArray)
+            {
+                Overrides.FromOSD(otmp as OSDArray);
             }
 
             IsLegacy = false;
@@ -387,52 +427,81 @@ namespace OpenSim.Framework
             return true;
         }
 
-        public bool FromAssetOSD(string name, OSD osd)
+        public bool replaceFromDayCycle(DayCycle daycycle, int track, UUID day_cycle_asset_id)
         {
-            if (osd is not OSDMap map)
-                return false;
-            if (!map.TryGetValue("type", out OSD tmp))
-                return false;
-            string type = tmp.AsString();
-
-            bool ok = false;
-            if (type == "water")
-            {
-                Cycle ??= new DayCycle();
-                ok = Cycle.replaceWaterFromOSD(name, map);
-            }
-            else
-            {
-                if (type == "daycycle")
-                {
-                    Cycle = new DayCycle();
-                    Cycle.FromOSD(map);
-                    ok = true;
-                }
-                else if(type == "sky")
-                {
-                    Cycle ??= new DayCycle();
-                    ok = Cycle.replaceSkyFromOSD(name, map);
-                }
-            }
-            if(ok && !string.IsNullOrWhiteSpace(name))
-                Cycle.Name = name;
-
-            InvalidateCaches();
-            return ok;
+            FromAssetID = track == -1 ? day_cycle_asset_id : UUID.Zero;
+            return Cycle.replaceFromDayCycle(daycycle, track);
         }
 
-        public OSD ToOSD()
+        public bool replaceWater(WaterData water)
         {
-            return new OSDMap
+            FromAssetID = UUID.Zero;
+            return Cycle.replaceWater(water);
+        }
+
+        public bool replaceFromSkyData(SkyData sky_data, int track)
+        {
+            FromAssetID = UUID.Zero;
+            return Cycle.replaceFromSkyData(sky_data, track);
+        }
+
+        public void replaceTrackName(int track, string name)
+        {
+            if(track == -1)
             {
-                ["day_cycle"] = Cycle.ToOSD(),
+                DayCycleName = name;
+                WaterName = name;
+                GroundName = name;
+                AltitudeNames[0] = null;
+                AltitudeNames[1] = null;
+                AltitudeNames[2] = null;
+            }
+            else if (track == 0)
+            {
+                WaterName = name;
+            }
+            else if(track == 1)
+            {
+                GroundName = name;
+            }
+            else if(track > 1 && track < 5)
+            {
+                AltitudeNames[track - 2] = name;
+            }
+        }
+
+        public OSD ToOSD(bool for_viewer = false)
+        {
+            var map = new OSDMap
+            {
+                ["day_cycle"] = Cycle.ToOSD(false),
                 ["day_length"] = DayLength,
                 ["day_offset"] = DayOffset,
                 ["flags"] = Flags,
                 ["env_version"] = version,
                 ["track_altitudes"] = new OSDArray() { Altitudes[0], Altitudes[1], Altitudes[2] }
             };
+
+            if(FromAssetID.IsNotZero())
+            {
+                map["day_asset"] = FromAssetID;
+                map["day_names"] = DayCycleName;
+            }
+            else
+            {
+                // The names array is only included if one of the track names is set
+                if(WaterName != null || GroundName != null || AltitudeNames[0] != null || AltitudeNames[1] != null || AltitudeNames[2] != null)
+                {
+                    map["day_names"] = new OSDArray() { WaterName, GroundName, AltitudeNames[0], AltitudeNames[1], AltitudeNames[2] };
+                }
+            }
+
+            if(!for_viewer)
+            {
+                map["overrides"] = Overrides.ToOSD();
+            }
+
+            return map;
         }
 
         public readonly object m_cachedbytesLock = new();
@@ -460,12 +529,34 @@ namespace OpenSim.Framework
                 if (ret == null)
                 {
                     OSDMap map = new();
-                    OSDMap cenv = (OSDMap)ToOSD();
+                    OSDMap cenv = (OSDMap)ToOSD(true);
                     cenv["parcel_id"] = parcelID;
                     cenv["region_id"] = regionID;
                     map["environment"] = cenv;
                     map["parcel_id"] = parcelID;
                     map["success"] = true;
+
+                    // Todo: new way of doing this please
+                    var env = map["environment"] as OSDMap;
+                    var cycle = env["day_cycle"] as OSDMap;
+                    var frames = cycle["frames"] as OSDMap;
+                    var tracks = cycle["tracks"] as OSDArray;
+
+                    for (int iter = 0; iter < tracks.Count; iter++) 
+                    {
+                        OSDMap mod = Overrides.Tracks[iter];
+                        if (mod == null) continue;
+
+                        OSDArray track = tracks[iter] as OSDArray;
+
+                        foreach(OSDMap frame_info in track)
+                        {
+                            var name = frame_info["key_name"].AsString();
+                            var frame = frames[name] as OSDMap;
+                            EEPOverrides.MergeOSDMaps(frame, mod);
+                        }
+                    }
+
                     ret = OSDParser.SerializeLLSDXmlToBytes(map);
                     m_cachedbytes = ret;
                 }
@@ -552,6 +643,17 @@ namespace OpenSim.Framework
             return top;
         }
 
+        public int TrackIndex(float altitude)
+        {
+            for(int i = 0; i < 3; i++)
+            {
+                if (altitude < Altitudes[i])
+                    return i + 1;
+            }
+
+            return 4;
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public List<DayCycle.TrackEntry> FindTrack(float altitude)
         {
@@ -573,6 +675,87 @@ namespace OpenSim.Framework
                     break;
             }
             return track;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool FindWaters(float dayfrac, out float skyfrac, out WaterData sky1, out WaterData sky2)
+        {
+            sky1 = null;
+            sky2 = null;
+            skyfrac = dayfrac;
+
+            var track = Cycle.waterTrack;
+
+            if (track.Count == 1 || track[0].time < 0)
+            {
+                if (!Cycle.waterframes.TryGetValue(track[0].frameName, out sky1) || sky1 == null)
+                    return false;
+                return true;
+            }
+
+            int i = 0;
+            while (i < track.Count)
+            {
+                if (track[i].time > dayfrac)
+                    break;
+                ++i;
+            }
+
+            float firstFrac;
+            float secondFrac;
+            string first;
+            string second;
+
+            int ntracks = track.Count;
+            if (i == 0 || i == ntracks)
+            {
+                --ntracks;
+                firstFrac = track[ntracks].time;
+                first = track[ntracks].frameName;
+                secondFrac = track[0].time;
+                second = track[0].frameName;
+            }
+            else
+            {
+                secondFrac = track[i].time;
+                second = track[i].frameName;
+                --i;
+                firstFrac = track[i].time;
+                first = track[i].frameName;
+            }
+
+            if (!Cycle.waterframes.TryGetValue(first, out sky1) || sky1 == null)
+                firstFrac = -1;
+            if (!Cycle.waterframes.TryGetValue(second, out sky2) || sky2 == null)
+                secondFrac = -1;
+
+            if (firstFrac < 0)
+            {
+                if (secondFrac < 0)
+                    return false;
+
+                sky1 = sky2;
+                sky2 = null;
+                return true;
+            }
+
+            if (secondFrac < 0 || secondFrac == firstFrac)
+            {
+                sky2 = null;
+                return true;
+            }
+
+            if (firstFrac > secondFrac)
+            {
+                secondFrac += 1;
+            }
+
+            dayfrac -= firstFrac;
+            secondFrac -= firstFrac;
+            dayfrac /= secondFrac;
+            skyfrac = Utils.Clamp(dayfrac, 0, 1f);
+
+            return true;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

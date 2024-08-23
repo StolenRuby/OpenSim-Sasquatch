@@ -31,10 +31,13 @@ using OpenMetaverse.StructuredData;
 
 namespace OpenSim.Framework
 {
-    public class WaterData
+    public class WaterData : EnvironmentData
     {
-        public UUID normalMap = new("822ded49-9a6c-f61c-cb89-6df54f42cdf4");
-        public UUID transpTexture = new("2bfd3884-7e27-69b9-ba3a-3e673f680004");
+        public static readonly UUID DefaultNormalMap = new("822ded49-9a6c-f61c-cb89-6df54f42cdf4");
+        public static readonly UUID DefaultTransparent = new("2bfd3884-7e27-69b9-ba3a-3e673f680004");
+
+        public UUID normalMap = DefaultNormalMap;
+        public UUID transpTexture = DefaultTransparent;
 
         public float blurMultiplier = 0.04f;
         public float fresnelOffset = 0.5f;
@@ -89,7 +92,7 @@ namespace OpenSim.Framework
             };
         }
 
-        public void FromOSD(string name, OSDMap map)
+        public override void FromOSD(OSDMap map)
         {
             OSD otmp;
             if (map.TryGetValue("blur_multiplier", out otmp))
@@ -118,13 +121,13 @@ namespace OpenSim.Framework
                 wave2Dir = otmp;
             if (map.TryGetValue("transparent_texture", out otmp))
                 transpTexture = otmp;
-
-            Name = name;
+            if (map.TryGetValue("name", out otmp))
+                Name = otmp;
         }
 
-        public OSDMap ToOSD()
+        public override OSDMap ToOSD(bool include_name = true)
         {
-            return new OSDMap
+            var map = new OSDMap
             {
                 ["blur_multiplier"] = blurMultiplier,
                 ["fresnel_offset"] = fresnelOffset,
@@ -141,9 +144,14 @@ namespace OpenSim.Framework
                 ["transparent_texture"] = transpTexture,
                 ["type"] = "water"
             };
+
+            if (include_name)
+                map["name"] = Name;
+
+            return map;
         }
 
-        public void GatherAssets(Dictionary<UUID, sbyte> uuids)
+        public override void GatherAssets(Dictionary<UUID, sbyte> uuids)
         {
             Util.AddToGatheredIds(uuids, normalMap, (sbyte)AssetType.Texture);
             Util.AddToGatheredIds(uuids, transpTexture, (sbyte)AssetType.Texture);

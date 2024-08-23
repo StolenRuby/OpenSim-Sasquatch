@@ -31,7 +31,7 @@ using OpenMetaverse.StructuredData;
 
 namespace OpenSim.Framework
 {
-    public class SkyData
+    public class SkyData : EnvironmentData
     {
         public struct AbsCoefData
         {
@@ -124,12 +124,19 @@ namespace OpenSim.Framework
         //mCoefData(float w, float expt, float exps, float lin, float cons, float ani)
         public mCoefData mieconf = new(0, 1f, -8.333333e-4f, 0, 0, 0.8f);
 
-        UUID bloom_id = new("3c59f7fe-9dc8-47f9-8aaf-a9dd1fbc3bef");
-        UUID cloud_id = new("1dc1368f-e8fe-f02d-a08d-9d9f11c1af6b");
-        UUID halo_id = new("12149143-f599-91a7-77ac-b52a3c0f59cd");
-        UUID moon_id = new("ec4b9f0b-d008-45c6-96a4-01dd947ac621");
-        UUID rainbow_id = new("11b4c57c-56b3-04ed-1f82-2004363882e4");
-        UUID sun_id = UUID.Zero;
+        public static readonly UUID DefaultBloom = new("3c59f7fe-9dc8-47f9-8aaf-a9dd1fbc3bef");
+        public static readonly UUID DefaultCloud = new("1dc1368f-e8fe-f02d-a08d-9d9f11c1af6b");
+        public static readonly UUID DefaultHalo = new("12149143-f599-91a7-77ac-b52a3c0f59cd");
+        public static readonly UUID DefaultMoon = new("ec4b9f0b-d008-45c6-96a4-01dd947ac621");
+        public static readonly UUID DefaultRainbow = new("11b4c57c-56b3-04ed-1f82-2004363882e4");
+        public static readonly UUID DefaultSun = UUID.Zero;
+
+        public UUID bloom_id = DefaultBloom;
+        public UUID cloud_id = DefaultCloud;
+        public UUID halo_id = DefaultHalo;
+        public UUID moon_id = DefaultMoon;
+        public UUID rainbow_id = DefaultRainbow;
+        public UUID sun_id = DefaultSun;
 
         public Vector3 ambient = new(1.047f, 1.047f, 1.047f); //?
         public Vector3 blue_density = new(0.2447f, 0.4487f, 0.76f);
@@ -260,7 +267,7 @@ namespace OpenSim.Framework
             return map;
         }
 
-        public OSD ToOSD()
+        public override OSDMap ToOSD(bool incude_name = true)
         {
             OSDMap map = new(64)
             {
@@ -321,10 +328,13 @@ namespace OpenSim.Framework
             if(HasRefProbe)
                 map["reflection_probe_ambiance"] = reflectionProbeAmbiance;
 
+            if (incude_name)
+                map["name"] = Name;
+
             return map;
         }
 
-        public void FromOSD(string name, OSDMap map)
+        public override void FromOSD(OSDMap map)
         {
             OSD otmp;
             if (map.TryGetValue("absorption_config", out otmp) && otmp is OSDArray absorptionArray)
@@ -449,10 +459,12 @@ namespace OpenSim.Framework
                     sunlight_color = new Vector4(tv.X, tv.Y, tv.Z, 0);
                 }
             }
-            Name = name;
+
+            if (map.TryGetValue("name", out otmp))
+                Name = otmp;
         }
 
-        public void GatherAssets(Dictionary<UUID, sbyte> uuids)
+        public override void GatherAssets(Dictionary<UUID, sbyte> uuids)
         {
             Util.AddToGatheredIds(uuids, bloom_id, (sbyte)AssetType.Texture);
             Util.AddToGatheredIds(uuids, cloud_id, (sbyte)AssetType.Texture);

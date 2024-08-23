@@ -442,13 +442,10 @@ namespace OpenSim.Region.CoreModules.World.LightShare
                 }
             }
 
-            osUTF8 sb = LLSDxmlEncode2.Start();
-            LLSDxmlEncode2.AddMap(sb);
-            LLSDxmlEncode2.AddElem("messageID", UUID.Zero, sb);
-            LLSDxmlEncode2.AddElem("regionID", regionID, sb);
-            LLSDxmlEncode2.AddElem("success", true, sb);
-            LLSDxmlEncode2.AddEndMap(sb);
-            httpResponse.RawBuffer = LLSDxmlEncode2.EndToBytes(sb);
+            var denv = ViewerEnvironment.DefaultToOSD(regionID, parcel) as OSDMap;
+
+            httpResponse.ContentType = "application/llsd+xml";
+            httpResponse.RawBuffer = OSDParser.SerializeLLSDXmlBytes(denv);
             httpResponse.StatusCode = (int)HttpStatusCode.OK;
         }
 
@@ -493,21 +490,8 @@ namespace OpenSim.Region.CoreModules.World.LightShare
                 }
             }
 
-            byte[] envBytes = VEnv.ToCapBytes(regionID, parcelid);
-            if(envBytes is null)
-            {
-                osUTF8 sb = LLSDxmlEncode2.Start();
-                LLSDxmlEncode2.AddArray(sb);
-                LLSDxmlEncode2.AddMap(sb);
-                LLSDxmlEncode2.AddElem("messageID", UUID.Zero, sb);
-                LLSDxmlEncode2.AddElem("regionID", regionID, sb);
-                LLSDxmlEncode2.AddEndMap(sb);
-                LLSDxmlEncode2.AddEndArray(sb);
-                httpResponse.RawBuffer = LLSDxmlEncode2.EndToBytes(sb);
-            }
-            else
-                httpResponse.RawBuffer = envBytes;
-
+            httpResponse.ContentType = "application/llsd+xml";
+            httpResponse.RawBuffer = VEnv.ToCapBytes(regionID, parcelid);
             httpResponse.StatusCode = (int)HttpStatusCode.OK;
         }
 
@@ -518,13 +502,11 @@ namespace OpenSim.Region.CoreModules.World.LightShare
             int parcel = -1;
             int track = -1;
 
-            osUTF8 sb = LLSDxmlEncode2.Start();
-
             ScenePresence sp = m_scene.GetScenePresence(agentID);
             if (sp is null || sp.IsChildAgent || sp.IsNPC)
             {
                 message = "Could not locate your avatar";
-                goto Error;
+                goto Response;
             }
 
             if (httpRequest.Query.Count > 0)
@@ -534,7 +516,7 @@ namespace OpenSim.Region.CoreModules.World.LightShare
                     if (!Int32.TryParse((string)httpRequest.Query["parcelid"], out parcel))
                     {
                         message = "Failed to decode request";
-                        goto Error;
+                        goto Response;
                     }
                 }
                 if (httpRequest.Query.ContainsKey("trackno"))
@@ -542,45 +524,54 @@ namespace OpenSim.Region.CoreModules.World.LightShare
                     if (!Int32.TryParse((string)httpRequest.Query["trackno"], out track))
                     {
                         message = "Failed to decode request";
-                        goto Error;
+                        goto Response;
                     }
-                }
-                if (track != -1)
-                {
-                    message = "Environment Track not supported";
-                    goto Error;
                 }
             }
 
+            ViewerEnvironment currentEnvironment = null;
+            ILandObject lchannel = null;
 
-            ViewerEnvironment VEnv;
-            ILandObject lchannel;
+            // Quick permission check before we start parsing...
             if (parcel == -1)
             {
                 if (!m_scene.Permissions.CanIssueEstateCommand(agentID, false))
                 {
                     message = "Insufficient estate permissions, settings has not been saved.";
-                    goto Error;
+                    goto Response;
                 }
-                VEnv = m_scene.RegionEnvironment;
-                lchannel = null;
+
+                currentEnvironment = m_scene.RegionEnvironment;
             }
             else
             {
                 lchannel = m_landChannel.GetLandObject(parcel);
-                if(lchannel is null || lchannel.LandData is null)
+                if (lchannel is null || lchannel.LandData is null)
                 {
                     message = "Could not locate requested parcel";
-                    goto Error;
+                    goto Response;
                 }
 
                 if (!m_scene.Permissions.CanEditParcelProperties(agentID, lchannel, GroupPowers.AllowEnvironment, true)) // wrong
                 {
                     message = "No permission to change parcel environment";
-                    goto Error;
+                    goto Response;
                 }
-                VEnv = lchannel.LandData.Environment;
+
+                currentEnvironment = lchannel.LandData.Environment;
             }
+
+            // If we don't have an environment, clone the default
+            currentEnvironment ??= m_DefaultEnv.Clone();
+
+            // Now let's figure out what we've been sent...
+            EnvironmentData environmentData = null;
+            OSDMap environmentMap = null;
+
+            string day_name = string.Empty;
+            bool update_name = true;
+
+            UUID env_asset_id = UUID.Zero;
 
             try
             {
@@ -589,12 +580,19 @@ namespace OpenSim.Region.CoreModules.World.LightShare
                 {
                     if(map.TryGetValue("environment", out OSD env))
                     {
-                        // need a proper clone
-                        VEnv ??= m_DefaultEnv.Clone();
+                        environmentMap = env as OSDMap;
 
-                        OSDMap evmap = env as OSDMap;
-                        if(evmap.TryGetValue("day_asset", out OSD tmp) && !evmap.ContainsKey("day_cycle"))
+                        if(environmentMap.TryGetValue("day_cycle", out var cycle))
                         {
+                            environmentData = new DayCycle();
+                            environmentData.FromOSD((OSDMap)cycle);
+                            update_name = false;
+                        }
+                        else if(environmentMap.TryGetValue("day_asset", out OSD tmp))
+                        {
+                            if (environmentMap.TryGetValue("day_name", out OSD dname))
+                                day_name = dname;
+
                             string id = tmp.AsString();
                             AssetBase asset = m_assetService.Get(id);
                             if(asset is null || asset.Data is null || asset.Data.Length == 0)
@@ -602,61 +600,21 @@ namespace OpenSim.Region.CoreModules.World.LightShare
                                 httpResponse.StatusCode = (int)HttpStatusCode.NotFound;
                                 return;
                             }
+
                             try
                             {
                                 OSD oenv = OSDParser.Deserialize(asset.Data);
-                                evmap.TryGetValue("day_name", out tmp);
-                                if(tmp is OSDString)
-                                    VEnv.FromAssetOSD(tmp.AsString(), oenv);
-                                else
-                                    VEnv.FromAssetOSD(null, oenv);
+                                environmentData = EnvironmentData.ClassFromMap((OSDMap)oenv);
                             }
                             catch
                             {
                                 httpResponse.StatusCode = (int)HttpStatusCode.NotFound;
                                 return;
                             }
-                        }
-                        else
-                            VEnv.FromOSD(env);
 
-                        if(lchannel is null)
-                        {
-                            StoreOnRegion(VEnv);
-                            m_log.InfoFormat("[{0}]: ExtEnvironment region {1} settings from agentID {2} saved",
-                                Name, caps.RegionName, agentID);
+                            env_asset_id = asset.FullID;
                         }
-                        else
-                        {
-                            lchannel.StoreEnvironment(VEnv);
-                            m_log.InfoFormat("[{0}]: ExtEnvironment parcel {1} of region {2}  settings from agentID {3} saved",
-                                Name, parcel, caps.RegionName, agentID);
-                        }
-
-                        WindlightRefresh(0, lchannel is null);
-                        success = true;
                     }
-                }
-                else if (req is OSDArray)
-                {
-                    VEnv = new ViewerEnvironment();
-                    VEnv.FromWLOSD(req);
-                    StoreOnRegion(VEnv);
-                    success = true;
-
-                    WindlightRefresh(0);
-
-                    m_log.InfoFormat("[{0}]: ExtEnvironment region {1} settings from agentID {2} saved",
-                                                    Name, caps.RegionName, agentID);
-
-                    LLSDxmlEncode2.AddMap(sb);
-                    LLSDxmlEncode2.AddElem("messageID", UUID.Zero, sb);
-                    LLSDxmlEncode2.AddElem("regionID", regionID, sb);
-                    LLSDxmlEncode2.AddElem("success", success, sb);
-                    LLSDxmlEncode2.AddEndMap(sb);
-                    httpResponse.RawBuffer = LLSDxmlEncode2.EndToBytes(sb);
-                    httpResponse.StatusCode = (int)HttpStatusCode.OK;
-                    return;
                 }
             }
             catch (Exception e)
@@ -665,16 +623,88 @@ namespace OpenSim.Region.CoreModules.World.LightShare
                     Name, caps.RegionName, e.Message, e.StackTrace);
 
                 success = false;
-                message = String.Format("ExtEnvironment Set for region {0} has failed, settings not saved.", caps.RegionName);
+                message = string.Format("ExtEnvironment Set for region {0} has failed, settings not saved.", caps.RegionName);
+                goto Response;
             }
 
-        Error:
+            // Apply the changes...
+            if(environmentData != null)
+            {
+                if (environmentData is DayCycle)
+                {
+                    currentEnvironment.replaceFromDayCycle(environmentData as DayCycle, track, env_asset_id);
+                    if (update_name) currentEnvironment.replaceTrackName(track, day_name);
+                }
+                else if (environmentData is WaterData)
+                {
+                    currentEnvironment.replaceWater(environmentData as WaterData);
+                    if (update_name) currentEnvironment.replaceTrackName(0, day_name);
+                }
+                else if (environmentData is SkyData)
+                {
+                    currentEnvironment.replaceFromSkyData(environmentData as SkyData, track);
+                    if (update_name)
+                    {
+                        if (track == -1)
+                        {
+                            string water_name = currentEnvironment.WaterName;
+                            currentEnvironment.replaceTrackName(-1, day_name);
+                            currentEnvironment.WaterName = water_name;
+                        }
+                        else
+                        {
+                            currentEnvironment.replaceTrackName(track, day_name);
+                        }
+                    }
+                }
+            }
+
+            if (environmentMap.TryGetValue("day_length", out OSD dlength))
+                currentEnvironment.DayLength = dlength;
+            if (environmentMap.TryGetValue("day_offset", out OSD doffset))
+                currentEnvironment.DayOffset = doffset;
+            if (environmentMap.TryGetValue("flags", out OSD dflags))
+                currentEnvironment.Flags = dflags;
+
+            if (parcel == -1 && // only let the region change the alititudes
+                environmentMap.TryGetValue("track_altitudes", out OSD alts) && alts is OSDArray)
+            {
+                var arr = alts as OSDArray;
+                currentEnvironment.Altitudes[0] = (float)arr[0].AsReal();
+                currentEnvironment.Altitudes[1] = (float)arr[1].AsReal();
+                currentEnvironment.Altitudes[2] = (float)arr[2].AsReal();
+            }
+
+            currentEnvironment.InvalidateCaches();
+
+            success = true;
+
+            // Lastly, update the parcel or region...
+            if (lchannel is null)
+            {
+                StoreOnRegion(currentEnvironment);
+                m_log.InfoFormat("[{0}]: ExtEnvironment region {1} settings from agentID {2} saved",
+                    Name, caps.RegionName, agentID);
+            }
+            else
+            {
+                lchannel.StoreEnvironment(currentEnvironment);
+                m_log.InfoFormat("[{0}]: ExtEnvironment parcel {1} of region {2}  settings from agentID {3} saved",
+                    Name, parcel, caps.RegionName, agentID);
+            }
+
+            WindlightRefresh(0, lchannel is null);
+
+
+        Response:
+            osUTF8 sb = LLSDxmlEncode2.Start();
             LLSDxmlEncode2.AddMap(sb);
                 LLSDxmlEncode2.AddElem("success", success, sb);
                 if(!success)
                     LLSDxmlEncode2.AddElem("message", message, sb);
             LLSDxmlEncode2.AddEndMap(sb);
 
+            httpResponse.ContentType = "application/llsd+xml";
             httpResponse.RawBuffer = LLSDxmlEncode2.EndToBytes(sb);
             httpResponse.StatusCode = (int)HttpStatusCode.OK;
         }

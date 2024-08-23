@@ -43,6 +43,7 @@ namespace OpenSim.Region.Framework.Interfaces
 
         ViewerEnvironment GetRegionEnvironment();
 
+        float GetDayFractionTime(ViewerEnvironment env);
         float GetRegionDayFractionTime();
         int GetRegionDayLength();
         int GetRegionDayOffset();

@@ -18435,30 +18435,10 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             return rq.ToString();
         }
 
-        private EnvironmentUpdate ParamsToEnvUpdate(LSL_Float time, LSL_List param_list)
+        private bool ParamsToEnvUpdate(LSL_List param_list, string function, out OSDMap sky, out OSDMap water)
         {
-            string parcel = World.LandChannel.GetLandObject(m_host.AbsolutePosition).LandData.Name;
-
-            if(param_list.Length == 0)
-            {
-                return new ClearEnvironmentUpdate
-                {
-                    OwnerID = m_item.OwnerID,
-                    TransitionTime = (float)time.value,
-                    ObjectName = m_item.Name,
-                    Permission = 17,
-                    ParcelName = parcel
-                };
-            }
-
-            var update = new PartialEnvironmentUpdate
-            {
-                OwnerID = m_item.OwnerID,
-                TransitionTime = (float)time.value,
-                ObjectName = m_item.Name,
-                Permission = 17,
-                ParcelName = parcel
-            };
+            sky = new OSDMap();
+            water = new OSDMap();
 
             int n = 0;
             int rulesParsed = 0;
@@ -18484,79 +18464,79 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                         case ScriptBaseClass.SKY_CLOUDS:
                             if (remain < 7)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_CLOUDS) Expecting vector parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_CLOUDS) Expecting vector parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
                             {
-                                update.sky["cloud_color"] = (Vector3)param_list.GetVector3Item(n++);
+                                sky["cloud_color"] = (Vector3)param_list.GetVector3Item(n++);
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_CLOUDS) Expecting vector parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_CLOUDS) Expecting vector parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
                             {
-                                update.sky["cloud_shadow"] = (float)param_list.GetLSLFloatItem(n++);
+                                sky["cloud_shadow"] = (float)param_list.GetLSLFloatItem(n++);
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_CLOUDS) Expecting float parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_CLOUDS) Expecting float parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
                             {
-                                update.sky["cloud_scale"] = (float)param_list.GetLSLFloatItem(n++);
+                                sky["cloud_scale"] = (float)param_list.GetLSLFloatItem(n++);
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_CLOUDS) Expecting float parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_CLOUDS) Expecting float parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
                             {
-                                update.sky["cloud_variance"] = (float)param_list.GetLSLFloatItem(n++);
+                                sky["cloud_variance"] = (float)param_list.GetLSLFloatItem(n++);
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_CLOUDS) Expecting float parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_CLOUDS) Expecting float parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
                             {
                                 Vector3 scroll = (Vector3)param_list.GetVector3Item(n++);
-                                update.sky["cloud_scroll_rate"] = new Vector2(scroll.X, scroll.Y);
+                                sky["cloud_scroll_rate"] = new Vector2(scroll.X, scroll.Y);
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_CLOUDS) Expecting vector parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_CLOUDS) Expecting vector parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
                             {
-                                update.sky["cloud_pos_density1"] = (Vector3)param_list.GetVector3Item(n++);
+                                sky["cloud_pos_density1"] = (Vector3)param_list.GetVector3Item(n++);
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_CLOUDS) Expecting vector parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_CLOUDS) Expecting vector parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
                             {
-                                update.sky["cloud_pos_density2"] = (Vector3)param_list.GetVector3Item(n++);
+                                sky["cloud_pos_density2"] = (Vector3)param_list.GetVector3Item(n++);
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_CLOUDS) Expecting vector parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_CLOUDS) Expecting vector parameter..", rulesParsed));
+                                return false;
                             }
 
                             break;
@@ -18570,14 +18550,14 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
                                 UUID texture_id = ScriptUtils.GetAssetIdFromKeyOrItemName(m_host, texture);
                                 if (texture_id == UUID.Zero)
-                                    update.sky["cloud_id"] = texture_id;
+                                    sky["cloud_id"] = texture_id;
                                 else
                                     error = true;
                             }
 
                             if (error)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} -> SKY_CLOUD_TEXTURE: arg #{1} - parameter 1 must be a texture name/key", rulesParsed, n - index - 1));
+                                Error(function, string.Format("Error running rule #{0} -> SKY_CLOUD_TEXTURE: arg #{1} - parameter 1 must be a texture name/key", rulesParsed, n - index - 1));
                             }
 
                             break;
@@ -18589,48 +18569,48 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                             {
                                 LSL_Float f = param_list.GetLSLFloatItem(n++);
                                 float fl = (float)f.value;
-                                update.sky["gamma"] = Math.Clamp(fl, 0.0f, 20.0f);
+                                sky["gamma"] = Math.Clamp(fl, 0.0f, 20.0f);
                             }
 
                             if (error)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} -> SKY_GAMMA: arg #{1} - parameter 1 must be a float", rulesParsed, n - index - 1));
+                                Error(function, string.Format("Error running rule #{0} -> SKY_GAMMA: arg #{1} - parameter 1 must be a float", rulesParsed, n - index - 1));
                             }
 
                             break;
                         case ScriptBaseClass.SKY_DOME:
                             if (remain < 2)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_DOME) Expecting float parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_DOME) Expecting float parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
                             {
-                                update.sky["cloud_color"] = (Vector3)param_list.GetVector3Item(n++);
+                                sky["cloud_color"] = (Vector3)param_list.GetVector3Item(n++);
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_DOME) Expecting vector parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_DOME) Expecting vector parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
                             {
-                                update.sky["cloud_shadow"] = (float)param_list.GetLSLFloatItem(n++);
+                                sky["cloud_shadow"] = (float)param_list.GetLSLFloatItem(n++);
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_DOME) Expecting float parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_DOME) Expecting float parameter..", rulesParsed));
+                                return false;
                             }
 
                             break;
                         case ScriptBaseClass.SKY_GLOW:
                             if (remain < 2)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_GLOW) Expecting float parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_GLOW) Expecting float parameter..", rulesParsed));
+                                return false;
                             }
 
                             Vector3 glow = new Vector3();
@@ -18642,8 +18622,8 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_GLOW) Expecting float parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_GLOW) Expecting float parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
@@ -18653,50 +18633,50 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_GLOW) Expecting float parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_GLOW) Expecting float parameter..", rulesParsed));
+                                return false;
                             }
 
-                            update.sky["glow"] = glow;
+                            sky["glow"] = glow;
 
                             break;
                         case ScriptBaseClass.SKY_MOON:
                             if (remain < 3)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_MOON) Expecting rotation parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_MOON) Expecting rotation parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
                             {
-                                update.sky["moon_rotation"] = (Quaternion)param_list.GetQuaternionItem(n++);
+                                sky["moon_rotation"] = (Quaternion)param_list.GetQuaternionItem(n++);
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_MOON) Expecting rotation parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_MOON) Expecting rotation parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
                             {
                                 float moon_scale = (float)param_list.GetLSLFloatItem(n++);
-                                update.sky["moon_scale"] = Math.Clamp(moon_scale, 0.25f, 20.0f);
+                                sky["moon_scale"] = Math.Clamp(moon_scale, 0.25f, 20.0f);
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_MOON) Expecting float parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_MOON) Expecting float parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
                             {
                                 float moon_brightness = (float)param_list.GetLSLFloatItem(n++);
-                                update.sky["moon_brightness"] = Math.Clamp(moon_brightness, 0.0f, 0.0f);
+                                sky["moon_brightness"] = Math.Clamp(moon_brightness, 0.0f, 0.0f);
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_MOON) Expecting float parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_MOON) Expecting float parameter..", rulesParsed));
+                                return false;
                             }
 
                             break;
@@ -18709,15 +18689,15 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                                 string texture = param_list.Data[n++].ToString();
 
                                 UUID texture_id = ScriptUtils.GetAssetIdFromKeyOrItemName(m_host, texture);
-                                if (texture_id == UUID.Zero)
-                                    update.sky["moon_id"] = texture_id;
+                                if (texture_id != UUID.Zero)
+                                    sky["moon_id"] = texture_id;
                                 else
                                     error = true;
                             }
 
                             if (error)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} -> SKY_MOON_TEXTURE: arg #{1} - parameter 1 must be a texture name/key", rulesParsed, n - index - 1));
+                                Error(function, string.Format("Error running rule #{0} -> SKY_MOON_TEXTURE: arg #{1} - parameter 1 must be a texture name/key", rulesParsed, n - index - 1));
                             }
 
                             break;
@@ -18729,41 +18709,41 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                             {
                                 LSL_Float f = param_list.GetLSLFloatItem(n++);
                                 float fl = (float)f.value;
-                                update.sky["star_brightness"] = Math.Clamp(fl, 0.0f, 500.0f);
+                                sky["star_brightness"] = Math.Clamp(fl, 0.0f, 500.0f);
                             }
 
                             if (error)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} -> SKY_STAR_BRIGHTNESS: arg #{1} - parameter 1 must be a float", rulesParsed, n - index - 1));
+                                Error(function, string.Format("Error running rule #{0} -> SKY_STAR_BRIGHTNESS: arg #{1} - parameter 1 must be a float", rulesParsed, n - index - 1));
                             }
 
                             break;
                         case ScriptBaseClass.SKY_SUN:
                             if (remain < 3)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_SUN) Expecting rotation parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_SUN) Expecting rotation parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
                             {
-                                update.sky["sun_rotation"] = (Quaternion)param_list.GetQuaternionItem(n++);
+                                sky["sun_rotation"] = (Quaternion)param_list.GetQuaternionItem(n++);
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_SUN) Expecting rotation parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_SUN) Expecting rotation parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
                             {
                                 float sun_scale = (float)param_list.GetLSLFloatItem(n++);
-                                update.sky["sun_scale"] = Math.Clamp(sun_scale, 0.25f, 20.0f);
+                                sky["sun_scale"] = Math.Clamp(sun_scale, 0.25f, 20.0f);
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_SUN) Expecting float parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_SUN) Expecting float parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
@@ -18774,12 +18754,12 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
                                 var srgb = llLinear2sRGB(sun_color);
 
-                                update.sky["sunlight_color"] = (Vector3)srgb;
+                                sky["sunlight_color"] = (Vector3)srgb;
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_SUN) Expecting vector parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_SUN) Expecting vector parameter..", rulesParsed));
+                                return false;
                             }
 
                             break;
@@ -18793,96 +18773,96 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
                                 UUID texture_id = ScriptUtils.GetAssetIdFromKeyOrItemName(m_host, texture);
                                 if (texture_id == UUID.Zero)
-                                    update.sky["sun_id"] = texture_id;
+                                    sky["sun_id"] = texture_id;
                                 else
                                     error = true;
                             }
 
                             if (error)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} -> SKY_SUN_TEXTURE: arg #{1} - parameter 1 must be a texture name/key", rulesParsed, n - index - 1));
+                                Error(function, string.Format("Error running rule #{0} -> SKY_SUN_TEXTURE: arg #{1} - parameter 1 must be a texture name/key", rulesParsed, n - index - 1));
                             }
 
                             break;
                         case ScriptBaseClass.SKY_PLANET:
                             if (remain < 3)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_PLANET) Expecting rotation parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_PLANET) Expecting rotation parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
                             {
                                 float planet_radius = (float)param_list.GetLSLFloatItem(n++);
-                                update.sky["planet_radius"] = Math.Clamp(planet_radius, 1000.0f, 32768.0f);
+                                sky["planet_radius"] = Math.Clamp(planet_radius, 1000.0f, 32768.0f);
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_PLANET) Expecting rotation parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_PLANET) Expecting rotation parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
                             {
                                 float sky_bottom_radius = (float)param_list.GetLSLFloatItem(n++);
-                                update.sky["sky_bottom_radius"] = Math.Clamp(sky_bottom_radius, 1000.0f, 32768.0f);
+                                sky["sky_bottom_radius"] = Math.Clamp(sky_bottom_radius, 1000.0f, 32768.0f);
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_PLANET) Expecting float parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_PLANET) Expecting float parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
                             {
                                 float sky_top_radius = (float)param_list.GetLSLFloatItem(n++);
-                                update.sky["sky_top_radius"] = Math.Clamp(sky_top_radius, 1000.0f, 32768.0f);
+                                sky["sky_top_radius"] = Math.Clamp(sky_top_radius, 1000.0f, 32768.0f);
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_PLANET) Expecting float parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_PLANET) Expecting float parameter..", rulesParsed));
+                                return false;
                             }
 
                             break;
                         case ScriptBaseClass.SKY_REFRACTION:
                             if (remain < 3)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_REFRACTION) Expecting rotation parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_REFRACTION) Expecting rotation parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
                             {
                                 float moisture_level = (float)param_list.GetLSLFloatItem(n++);
-                                update.sky["moisture_level"] = Math.Clamp(moisture_level, 0.0f, 1.0f);
+                                sky["moisture_level"] = Math.Clamp(moisture_level, 0.0f, 1.0f);
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_REFRACTION) Expecting rotation parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_REFRACTION) Expecting rotation parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
                             {
                                 float droplet_radius = (float)param_list.GetLSLFloatItem(n++);
-                                update.sky["droplet_radius"] = Math.Clamp(droplet_radius, 5.0f, 1000.0f);
+                                sky["droplet_radius"] = Math.Clamp(droplet_radius, 5.0f, 1000.0f);
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_REFRACTION) Expecting float parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_REFRACTION) Expecting float parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
                             {
                                 float ice_level = (float)param_list.GetLSLFloatItem(n++);
-                                update.sky["ice_level"] = Math.Clamp(ice_level, 0.0f, 1.0f);
+                                sky["ice_level"] = Math.Clamp(ice_level, 0.0f, 1.0f);
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_REFRACTION) Expecting float parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_REFRACTION) Expecting float parameter..", rulesParsed));
+                                return false;
                             }
 
                             break;
@@ -18894,83 +18874,83 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                             {
                                 LSL_Float f = param_list.GetLSLFloatItem(n++);
                                 float fl = (float)f.value;
-                                update.water["blur_multiplier"] = Math.Clamp(fl, -0.5f, 0.5f);
+                                water["blur_multiplier"] = Math.Clamp(fl, -0.5f, 0.5f);
                             }
 
                             if (error)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} -> WATER_BLUR_MULTIPLIER: arg #{1} - parameter 1 must be a float", rulesParsed, n - index - 1));
+                                Error(function, string.Format("Error running rule #{0} -> WATER_BLUR_MULTIPLIER: arg #{1} - parameter 1 must be a float", rulesParsed, n - index - 1));
                             }
 
                             break;
                         case ScriptBaseClass.WATER_FOG:
                             if (remain < 3)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (WATER_FOG) Expecting rotation parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (WATER_FOG) Expecting rotation parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
                             {
-                                update.water["water_fog_color"] = (Vector3)param_list.GetVector3Item(n++);
+                                water["water_fog_color"] = (Vector3)param_list.GetVector3Item(n++);
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (WATER_FOG) Expecting rotation parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (WATER_FOG) Expecting rotation parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
                             {
                                 float water_fog_density = (float)param_list.GetLSLFloatItem(n++);
-                                update.water["water_fog_density"] = Math.Clamp(water_fog_density, -10.0f, 10.0f);
+                                water["water_fog_density"] = Math.Clamp(water_fog_density, -10.0f, 10.0f);
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (WATER_FOG) Expecting float parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (WATER_FOG) Expecting float parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
                             {
                                 float underwater_fog_mod = (float)param_list.GetLSLFloatItem(n++);
-                                update.water["underwater_fog_mod"] = Math.Clamp(underwater_fog_mod, 0.0f, 20.0f);
+                                water["underwater_fog_mod"] = Math.Clamp(underwater_fog_mod, 0.0f, 20.0f);
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (WATER_FOG) Expecting float parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (WATER_FOG) Expecting float parameter..", rulesParsed));
+                                return false;
                             }
 
                             break;
                         case ScriptBaseClass.WATER_FRESNEL:
                             if (remain < 2)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (WATER_FRESNEL) Expecting float parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (WATER_FRESNEL) Expecting float parameter..", rulesParsed));
+                                return false;
                             }
                             
 
                             try
                             {
                                 float fresnel_offset = (float)param_list.GetLSLFloatItem(n++);
-                                update.water["fresnel_offset"] = Math.Clamp(fresnel_offset, 0.0f, 1.0f);
+                                water["fresnel_offset"] = Math.Clamp(fresnel_offset, 0.0f, 1.0f);
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (WATER_FRESNEL) Expecting float parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (WATER_FRESNEL) Expecting float parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
                             {
                                 float fresnel_scale = (float)param_list.GetLSLFloatItem(n++);
-                                update.water["fresnel_scale"] = Math.Clamp(fresnel_scale, 0.0f, 1.0f);
+                                water["fresnel_scale"] = Math.Clamp(fresnel_scale, 0.0f, 1.0f);
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (WATER_FRESNEL) Expecting float parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (WATER_FRESNEL) Expecting float parameter..", rulesParsed));
+                                return false;
                             }
 
 
@@ -18985,63 +18965,63 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
                                 UUID texture_id = ScriptUtils.GetAssetIdFromKeyOrItemName(m_host, texture);
                                 if (texture_id == UUID.Zero)
-                                    update.water["normal_map"] = texture_id;
+                                    water["normal_map"] = texture_id;
                                 else
                                     error = true;
                             }
 
                             if (error)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} -> WATER_NORMAL_TEXTURE: arg #{1} - parameter 1 must be a texture name/key", rulesParsed, n - index - 1));
+                                Error(function, string.Format("Error running rule #{0} -> WATER_NORMAL_TEXTURE: arg #{1} - parameter 1 must be a texture name/key", rulesParsed, n - index - 1));
                             }
 
                             break;
                         case ScriptBaseClass.WATER_NORMAL_SCALE:
                             if (remain < 1)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (WATER_NORMAL_SCALE) Expecting float parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (WATER_NORMAL_SCALE) Expecting float parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
                             {
-                                update.water["normal_scale"] = (Vector3)param_list.GetVector3Item(n++);
+                                water["normal_scale"] = (Vector3)param_list.GetVector3Item(n++);
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (WATER_NORMAL_SCALE) Expecting vector parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (WATER_NORMAL_SCALE) Expecting vector parameter..", rulesParsed));
+                                return false;
                             }
 
                             break;
                         case ScriptBaseClass.WATER_REFRACTION:
                             if (remain < 2)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (WATER_REFRACTION) Expecting float parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (WATER_REFRACTION) Expecting float parameter..", rulesParsed));
+                                return false;
                             }
 
 
                             try
                             {
                                 float scale_above = (float)param_list.GetLSLFloatItem(n++);
-                                update.water["scale_above"] = Math.Clamp(scale_above, 0.0f, 3.0f);
+                                water["scale_above"] = Math.Clamp(scale_above, 0.0f, 3.0f);
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (WATER_REFRACTION) Expecting float parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (WATER_REFRACTION) Expecting float parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
                             {
                                 float scale_below = (float)param_list.GetLSLFloatItem(n++);
-                                update.water["scale_below"] = Math.Clamp(scale_below, 0.0f, 3.0f);
+                                water["scale_below"] = Math.Clamp(scale_below, 0.0f, 3.0f);
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (WATER_REFRACTION) Expecting float parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (WATER_REFRACTION) Expecting float parameter..", rulesParsed));
+                                return false;
                             }
 
 
@@ -19049,8 +19029,8 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                         case ScriptBaseClass.WATER_WAVE_DIRECTION:
                             if (remain < 2)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (WATER_WAVE_DIRECTION) Expecting float parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (WATER_WAVE_DIRECTION) Expecting float parameter..", rulesParsed));
+                                return false;
                             }
 
 
@@ -19058,24 +19038,24 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                             {
                                 Vector3 vec1 = param_list.GetVector3Item(n++);
                                 Vector2 wave1_direction = new Vector2(vec1.X, vec1.Y);
-                                update.water["wave1_direction"] = wave1_direction;
+                                water["wave1_direction"] = wave1_direction;
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (WATER_WAVE_DIRECTION) Expecting float parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (WATER_WAVE_DIRECTION) Expecting float parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
                             {
                                 Vector3 vec2 = param_list.GetVector3Item(n++);
                                 Vector2 wave2_direction = new Vector2(vec2.X, vec2.Y);
-                                update.water["wave1_direction"] = wave2_direction;
+                                water["wave1_direction"] = wave2_direction;
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (WATER_WAVE_DIRECTION) Expecting float parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (WATER_WAVE_DIRECTION) Expecting float parameter..", rulesParsed));
+                                return false;
                             }
 
 
@@ -19083,8 +19063,8 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                         case ScriptBaseClass.SKY_AMBIENT:
                             if (remain < 1)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_AMBIENT) Expecting float parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_AMBIENT) Expecting float parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
@@ -19095,20 +19075,20 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                                 var srgb = llLinear2sRGB(vec);
 
                                 legacy_haze_ambient["ambient"] = (Vector3)srgb;
-                                update.sky["legacy_haze"] = legacy_haze_ambient;
+                                sky["legacy_haze"] = legacy_haze_ambient;
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_AMBIENT) Expecting vector parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_AMBIENT) Expecting vector parameter..", rulesParsed));
+                                return false;
                             }
 
                             break;
                         case ScriptBaseClass.SKY_BLUE:
                             if (remain < 2)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_BLUE) Expecting float parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_BLUE) Expecting float parameter..", rulesParsed));
+                                return false;
                             }
 
                             OSDMap legacy_haze_blue = new OSDMap();
@@ -19121,8 +19101,8 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_BLUE) Expecting vector parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_BLUE) Expecting vector parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
@@ -19133,18 +19113,18 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_BLUE) Expecting vector parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_BLUE) Expecting vector parameter..", rulesParsed));
+                                return false;
                             }
 
-                            update.sky["legacy_haze"] = legacy_haze_blue;
+                            sky["legacy_haze"] = legacy_haze_blue;
 
                             break;
                         case ScriptBaseClass.SKY_HAZE:
                             if (remain < 4)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_HAZE) Expecting float parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_HAZE) Expecting float parameter..", rulesParsed));
+                                return false;
                             }
 
                             OSDMap legacy_haze_haze = new OSDMap();
@@ -19156,8 +19136,8 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_HAZE) Expecting vector parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_HAZE) Expecting vector parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
@@ -19167,8 +19147,8 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_HAZE) Expecting vector parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_HAZE) Expecting vector parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
@@ -19178,8 +19158,8 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_HAZE) Expecting vector parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_HAZE) Expecting vector parameter..", rulesParsed));
+                                return false;
                             }
 
                             try
@@ -19189,11 +19169,11 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                             }
                             catch (InvalidCastException)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} (SKY_HAZE) Expecting vector parameter..", rulesParsed));
-                                return null;
+                                Error(function, string.Format("Error running rule #{0} (SKY_HAZE) Expecting vector parameter..", rulesParsed));
+                                return false;
                             }
 
-                            update.sky["legacy_haze"] = legacy_haze_haze;
+                            sky["legacy_haze"] = legacy_haze_haze;
 
                             break;
                         case ScriptBaseClass.SKY_REFLECTION_PROBE_AMBIANCE:
@@ -19203,51 +19183,79 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                             if (!error)
                             {
                                 float fl = (float)param_list.GetLSLFloatItem(n++);
-                                update.sky["reflection_probe_ambiance"] = Math.Clamp(fl, 0.0f, 10.0f);
+                                sky["reflection_probe_ambiance"] = Math.Clamp(fl, 0.0f, 10.0f);
                             }
 
                             if (error)
                             {
-                                Error("llSetAgentEnvironment", string.Format("Error running rule #{0} -> SKY_REFLECTION_PROBE_AMBIANCE: arg #{1} - parameter 1 must be a float", rulesParsed, n - index - 1));
+                                Error(function, string.Format("Error running rule #{0} -> SKY_REFLECTION_PROBE_AMBIANCE: arg #{1} - parameter 1 must be a float", rulesParsed, n - index - 1));
                             }
 
                             break;
 
                         default:
-                            Error("llSetAgentEnvironment", string.Format("Error running rule #{0} unknown rule id {1}.", rulesParsed, code));
+                            Error(function, string.Format("Error running rule #{0} unknown rule id {1}.", rulesParsed, code));
                             break;
                     }
                 }
             }
             catch
             {
-
+                return false;
             }
 
-            return update;
+            return true;
         }
 
         public LSL_Integer llSetAgentEnvironment(LSL_Key agent_id, LSL_Float transition, LSL_List param_list)
         {
             if (m_item.ExperienceID == UUID.Zero)
-                return new LSL_Integer(ScriptBaseClass.ENV_NOT_EXPERIENCE);
+                return ScriptBaseClass.ENV_NOT_EXPERIENCE;
 
 
             if (!UUID.TryParse(agent_id, out UUID avatar) || avatar.IsZero())
-                return new LSL_Integer(ScriptBaseClass.ENV_INVALID_AGENT);
+                return ScriptBaseClass.ENV_INVALID_AGENT;
 
             ScenePresence presence = World.GetScenePresence(avatar);
             if (presence == null || presence.IsChildAgent || presence.Animator == null)
-                return new LSL_Integer(ScriptBaseClass.ENV_INVALID_AGENT);
+                return ScriptBaseClass.ENV_INVALID_AGENT;
 
             if (World.ExperienceModule.GetExperiencePermission(avatar, m_item.ExperienceID) != ExperiencePermission.Allowed)
             {
-                return new LSL_Integer(ScriptBaseClass.ENV_NO_EXPERIENCE_PERMISSION);
+                return ScriptBaseClass.ENV_NO_EXPERIENCE_PERMISSION;
             }
 
-            EnvironmentUpdate update = ParamsToEnvUpdate(transition, param_list);
+            string parcel = World.LandChannel.GetLandObject(m_host.AbsolutePosition).LandData.Name;
 
-            if (update == null) return ScriptBaseClass.ENV_INVALID_RULE;
+            if (param_list.Length == 0)
+            {
+                var clear = new ClearEnvironmentUpdate
+                {
+                    OwnerID = m_item.OwnerID,
+                    TransitionTime = (float)transition.value,
+                    ObjectName = m_item.Name,
+                    Permission = 17,
+                    ParcelName = parcel
+                };
+            }
+
+            bool success = ParamsToEnvUpdate(param_list, "llSetAgentInveironment", out var sky, out var water);
+
+            if (!success)
+            {
+                return ScriptBaseClass.ENV_INVALID_RULE;
+            }
+            
+            var update = new PartialEnvironmentUpdate
+            {
+                OwnerID = m_item.OwnerID,
+                TransitionTime = (float)transition.value,
+                ObjectName = m_item.Name,
+                Permission = 17,
+                ParcelName = parcel,
+                water = water,
+                sky = sky
+            };
 
             m_EventQueue.SendEnvironmentUpdate(m_item.ExperienceID, avatar, update);
 
@@ -19257,19 +19265,19 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
         public LSL_Integer llReplaceAgentEnvironment(LSL_Key agent_id, LSL_Float transition, LSL_String environment)
         {
             if (m_item.ExperienceID == UUID.Zero)
-                return new LSL_Integer(ScriptBaseClass.ENV_NOT_EXPERIENCE);
+                return ScriptBaseClass.ENV_NOT_EXPERIENCE;
 
 
             if (!UUID.TryParse(agent_id, out UUID avatar) || avatar.IsZero())
-                return new LSL_Integer(ScriptBaseClass.ENV_INVALID_AGENT);
+                return ScriptBaseClass.ENV_INVALID_AGENT;
 
             ScenePresence presence = World.GetScenePresence(avatar);
             if (presence == null || presence.IsChildAgent || presence.Animator == null)
-                return new LSL_Integer(ScriptBaseClass.ENV_INVALID_AGENT);
+                return ScriptBaseClass.ENV_INVALID_AGENT;
 
             if (World.ExperienceModule.GetExperiencePermission(avatar, m_item.ExperienceID) != ExperiencePermission.Allowed)
             {
-                return new LSL_Integer(ScriptBaseClass.ENV_NO_EXPERIENCE_PERMISSION);
+                return ScriptBaseClass.ENV_NO_EXPERIENCE_PERMISSION;
             }
 
             if (string.IsNullOrEmpty(environment) || environment == ScriptBaseClass.NULL_KEY)
@@ -19300,6 +19308,468 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
                 m_EventQueue.SendEnvironmentUpdate(m_item.ExperienceID, avatar, update);
 
+            }
+
+            return 1;
+        }
+
+        public LSL_List llGetEnvironment(LSL_Vector position, LSL_List param_list)
+        {
+            bool is_region = position.x == -1 && position.y == -1;
+
+            ViewerEnvironment current;
+            ILandObject parcel = null;
+
+            if (is_region)
+            {
+                current = m_envModule.GetRegionEnvironment();
+            }
+            else
+            {
+                parcel = World.LandChannel.GetLandObject((float)position.x, (float)position.y);
+                current = parcel.LandData.Environment;
+
+                if(current == null)
+                {
+                    current = m_envModule.GetRegionEnvironment();
+                }
+            }
+
+            var sky_track = current.FindTrack((float)position.z);
+            if (sky_track is null || sky_track.Count == 0)
+            {
+                m_log.Error("Some how we do not have a sky?");
+                Error("llGetEnvironment", "Failed to get a sky track.");
+                return new LSL_List();
+            }
+
+            var dayfrac = m_envModule.GetDayFractionTime(current);
+
+            if (!current.FindSkies(sky_track, dayfrac, out float skyfrac, out SkyData sky1, out SkyData sky2))
+            {
+                // todo: decide what happens here
+                sky1 = new SkyData();
+                sky2 = null;
+            }
+
+            if (!current.FindWaters(dayfrac, out float waterfrac, out WaterData water1, out WaterData water2))
+            {
+                // todo: decide what happens here
+                water1 = new WaterData();
+                water2 = null;
+            }
+
+            var result = new LSL_List();
+
+            for(int iter = 0; iter < param_list.Length; iter++)
+            {
+                if(param_list[iter] is not LSL_Integer)
+                {
+                    Error("llGetEnvironment", $"Error running rule #{iter + 1}: non-integer rule.");
+                    return new LSL_List([]);
+                }
+
+                int rule = (int)(LSL_Integer)param_list[iter];
+
+                switch(rule)
+                {
+                    case ScriptBaseClass.SKY_TRACKS:
+                        {
+                            result.Add(current.Altitudes[0]);
+                            result.Add(current.Altitudes[1]);
+                            result.Add(current.Altitudes[2]);
+                            break;
+                        }
+                    case ScriptBaseClass.SKY_AMBIENT:
+                        {
+                            var ambient = sky2 == null ? sky1.ambient : Vector3.Lerp(sky1.ambient, sky2.ambient, skyfrac);
+                            result.Add((LSL_Vector)ambient);
+                            break;
+                        }
+                    case ScriptBaseClass.SKY_TEXTURE_DEFAULTS:
+                        {
+                            result.Add(sky1.bloom_id == SkyData.DefaultBloom ? 1 : 0);
+                            result.Add(sky1.halo_id == SkyData.DefaultHalo ? 1 : 0);
+                            result.Add(sky1.rainbow_id == SkyData.DefaultRainbow ? 1 : 0);
+                            break;
+                        }
+                    case ScriptBaseClass.SKY_CLOUDS: // Unfinished
+                        {
+                            var cloud_color = sky2 == null ? sky1.cloud_color : Vector3.Lerp(sky1.cloud_color, sky2.cloud_color, skyfrac);
+                            var cloud_scale = sky2 == null ? sky1.cloud_scale : float.Lerp(sky1.cloud_scale, sky2.cloud_scale, skyfrac);
+                            var cloud_variance = sky2 == null ? sky1.cloud_variance : float.Lerp(sky1.cloud_variance, sky2.cloud_variance, skyfrac);
+
+                            var cloud_scroll_rate_x = sky2 == null ? sky1.cloud_scroll_rate.X : float.Lerp(sky1.cloud_scroll_rate.X, sky2.cloud_scroll_rate.X, skyfrac);
+                            var cloud_scroll_rate_y = sky2 == null ? sky1.cloud_scroll_rate.Y : float.Lerp(sky1.cloud_scroll_rate.Y, sky2.cloud_scroll_rate.Y, skyfrac);
+
+                            result.Add((LSL_Vector)cloud_color);
+                            result.Add(0.0f); // todo: coverage
+                            result.Add(cloud_scale);
+                            result.Add(cloud_variance);
+                            result.Add(new LSL_Vector(cloud_scroll_rate_x, cloud_scroll_rate_y, 0)); 
+                            result.Add(LSL_Vector.Zero); // todo: density
+                            result.Add(LSL_Vector.Zero); // todo: detail
+                            result.Add(sky1.cloud_id == SkyData.DefaultCloud ? 1 : 0);
+                            break;
+                        }
+                    case ScriptBaseClass.SKY_DOME:
+                        {
+                            var dome_offset = sky2 == null ? sky1.dome_offset : float.Lerp(sky1.dome_offset, sky2.dome_offset, skyfrac);
+                            var dome_radius = sky2 == null ? sky1.dome_radius : float.Lerp(sky1.dome_radius, sky2.dome_radius, skyfrac);
+                            var max_y = sky2 == null ? sky1.max_y : float.Lerp(sky1.max_y, sky2.max_y, skyfrac);
+
+                            result.Add(dome_offset);
+                            result.Add(dome_radius);
+                            result.Add(max_y);
+                            break;
+                        }
+                    case ScriptBaseClass.SKY_GAMMA:
+                        {
+                            var gamma = sky2 == null ? sky1.gamma : float.Lerp(sky1.gamma, sky2.gamma, skyfrac);
+
+                            result.Add(gamma);
+                            break;
+                        }
+                    case ScriptBaseClass.SKY_GLOW:
+                        {
+                            var glow_x = sky2 == null ? sky1.glow.X : float.Lerp(sky1.glow.X, sky2.glow.X, skyfrac);
+                            var glow_z = sky2 == null ? sky1.glow.Z : float.Lerp(sky1.glow.Z, sky2.glow.Z, skyfrac);
+
+                            result.Add(glow_x);
+                            result.Add(glow_z);
+                            break;
+                        }
+                    case ScriptBaseClass.SKY_MOON: // Unfinished
+                        {
+                            var moon_rotation = sky2 == null ? sky1.moon_rotation : Quaternion.Slerp(sky1.moon_rotation, sky2.moon_rotation, skyfrac);
+                            var moon_scale = sky2 == null ? sky1.moon_scale : float.Lerp(sky1.moon_scale, sky2.moon_scale, skyfrac);
+                            var moon_brightness = sky2 == null ? sky1.moon_brightness : float.Lerp(sky1.moon_brightness, sky2.moon_brightness, skyfrac);
+
+                            result.Add((LSL_Rotation)moon_rotation);
+                            result.Add(moon_scale);
+                            result.Add(moon_brightness);
+                            result.Add(sky1.moon_id == SkyData.DefaultMoon ? 1 : 0);
+                            result.Add((LSL_Vector)ViewerEnvironment.Xrot(moon_rotation)); // i think?
+                            result.Add(LSL_Vector.Zero); // todo: ambient colour
+                            result.Add(LSL_Vector.Zero); // todo: diffuse colour
+                            break;
+                        }
+                    case ScriptBaseClass.SKY_STAR_BRIGHTNESS:
+                        {
+                            var star_brightness = sky2 == null ? sky1.star_brightness : float.Lerp(sky1.star_brightness, sky2.star_brightness, skyfrac);
+
+                            result.Add(star_brightness);
+                            break;
+                        }
+                    case ScriptBaseClass.SKY_SUN: // Unfinished
+                        {
+                            var sunlight_color = sky2 == null ? sky1.sunlight_color : Vector4.Lerp(sky1.sunlight_color, sky2.sunlight_color, skyfrac);
+                            var sun_rotation = sky2 == null ? sky1.sun_rotation : Quaternion.Slerp(sky1.sun_rotation, sky2.sun_rotation, skyfrac);
+                            var sun_scale = sky2 == null ? sky1.sun_scale : float.Lerp(sky1.sun_scale, sky2.sun_scale, skyfrac);
+
+                            // todo: fix this
+                            // OpenSim currently uses a Vector4 for... reasons?
+                            var sunlight_color_3 = new Vector3(sunlight_color.X, sunlight_color.Y, sunlight_color.Z);
+
+
+                            result.Add((LSL_Rotation)sun_rotation);
+                            result.Add(sun_scale);
+                            result.Add((LSL_Vector)sunlight_color_3);
+                            result.Add(sky1.sun_id == SkyData.DefaultSun ? 1 : 0);
+                            result.Add((LSL_Vector)ViewerEnvironment.Xrot(sun_rotation)); // i think?
+                            result.Add(LSL_Vector.Zero); // todo: ambient colour
+                            result.Add(LSL_Vector.Zero); // todo: diffuse colour
+                            break;
+                        }
+                    case ScriptBaseClass.SKY_PLANET:
+                        {
+                            var planet_radius = sky2 == null ? sky1.planet_radius : float.Lerp(sky1.planet_radius, sky2.planet_radius, skyfrac);
+                            var sky_bottom_radius = sky2 == null ? sky1.sky_bottom_radius : float.Lerp(sky1.sky_bottom_radius, sky2.sky_bottom_radius, skyfrac);
+                            var sky_top_radius = sky2 == null ? sky1.sky_top_radius : float.Lerp(sky1.sky_top_radius, sky2.sky_top_radius, skyfrac);
+
+                            result.Add(planet_radius);
+                            result.Add(sky_bottom_radius);
+                            result.Add(sky_top_radius);
+                            break;
+                        }
+                    case ScriptBaseClass.SKY_REFRACTION:
+                        {
+                            var moisture_level = sky2 == null ? sky1.moisture_level : float.Lerp(sky1.moisture_level, sky2.moisture_level, skyfrac);
+                            var droplet_radius = sky2 == null ? sky1.droplet_radius : float.Lerp(sky1.droplet_radius, sky2.droplet_radius, skyfrac);
+                            var ice_level = sky2 == null ? sky1.ice_level : float.Lerp(sky1.ice_level, sky2.ice_level, skyfrac);
+
+                            result.Add(moisture_level);
+                            result.Add(droplet_radius);
+                            result.Add(ice_level);
+                            break;
+                        }
+                    //case ScriptBaseClass.SKY_LIGHT:
+                    //    {
+                    //        result.Add(sky.dir);
+                    //        result.Add(sky.fade);
+                    //        result.Add(sky.total);
+                    //        break;
+                    //    }
+                    case ScriptBaseClass.SKY_REFLECTION_PROBE_AMBIANCE:
+                        {
+                            var probe_ambience = sky2 == null ? sky1.reflectionProbeAmbiance : float.Lerp(sky1.reflectionProbeAmbiance, sky2.reflectionProbeAmbiance, skyfrac);
+                            result.Add(probe_ambience);
+                            break;
+                        }
+                    case ScriptBaseClass.WATER_BLUR_MULTIPLIER:
+                        {
+                            var blur_multiplier = water2 == null ? water1.blurMultiplier : float.Lerp(water1.blurMultiplier, water2.blurMultiplier, waterfrac);
+                            result.Add(blur_multiplier);
+                            break;
+                        }
+                    case ScriptBaseClass.WATER_FOG:
+                        {
+                            var fog_color = water2 == null ? water1.waterFogColor : Vector3.Lerp(water1.waterFogColor, water2.waterFogColor, waterfrac);
+                            var fog_density = water2 == null ? water1.waterFogDensity : float.Lerp(water1.waterFogDensity, water2.waterFogDensity, waterfrac);
+                            var fog_mod = water2 == null ? water1.underWaterFogMod : float.Lerp(water1.underWaterFogMod, water2.underWaterFogMod, waterfrac);
+
+                            result.Add((LSL_Vector)fog_color);
+                            result.Add(fog_density);
+                            result.Add(fog_mod);
+                            break;
+                        }
+                    case ScriptBaseClass.WATER_FRESNEL:
+                        {
+                            var fres_offset = water2 == null ? water1.fresnelOffset : float.Lerp(water1.fresnelOffset, water2.fresnelOffset, waterfrac);
+                            var fres_scale = water2 == null ? water1.fresnelScale : float.Lerp(water1.fresnelScale, water2.fresnelScale, waterfrac);
+
+                            result.Add(fres_offset);
+                            result.Add(fres_scale);
+                            break;
+                        }
+                    case ScriptBaseClass.WATER_NORMAL_TEXTURE:
+                        {
+                            result.Add(water1.normalMap == WaterData.DefaultNormalMap ? 1 : 0);
+                            result.Add(water1.transpTexture == WaterData.DefaultTransparent ? 1 : 0);
+                            break;
+                        }
+                    case ScriptBaseClass.WATER_NORMAL_SCALE:
+                        {
+                            var norm_scale = water2 == null ? water1.normScale : Vector3.Lerp(water1.normScale, water2.normScale, waterfrac);
+
+                            result.Add((LSL_Vector)norm_scale);
+                            break;
+                        }
+                    case ScriptBaseClass.WATER_REFRACTION:
+                        {
+                            var scale_above = water2 == null ? water1.scaleAbove : float.Lerp(water1.scaleAbove, water2.scaleAbove, waterfrac);
+                            var scale_below = water2 == null ? water1.scaleBelow : float.Lerp(water1.scaleBelow, water2.scaleBelow, waterfrac);
+
+                            result.Add(scale_above);
+                            result.Add(scale_below);
+                            break;
+                        }
+                    case ScriptBaseClass.WATER_WAVE_DIRECTION:
+                        {
+                            var wave_1_dir = water2 == null ? water1.wave1Dir : Vector2.Lerp(water1.wave1Dir, water2.wave1Dir, waterfrac);
+                            var wave_2_dir = water2 == null ? water1.wave2Dir : Vector2.Lerp(water1.wave2Dir, water2.wave2Dir, waterfrac);
+
+                            result.Add((LSL_Vector)new Vector3(wave_1_dir, 0.0f));
+                            result.Add((LSL_Vector)new Vector3(wave_2_dir, 0.0f));
+                            break;
+                        }
+                    case ScriptBaseClass.ENVIRONMENT_DAYINFO:
+                        {
+                            result.Add(current.DayLength);
+                            result.Add(current.DayOffset);
+                            result.Add(llGetTimeOfDay());
+                            break;
+                        }
+                    default:
+                        {
+                            Error("llGetEnvironment", $"Error running rule #{iter + 1}: unknown rule id {rule}.");
+                            return new LSL_List([]);
+                        }
+                }
+            }
+
+            return result;
+        }
+
+        public LSL_Integer llSetEnvironment(LSL_Vector position, LSL_List param_list)
+        {
+            bool is_region = position.x == -1 && position.y == -1;
+            bool all_tracks = position.z == -1; // Use z=-1 to set an override on the special 'all tracks' slot.
+
+            ViewerEnvironment current;
+            ILandObject parcel = null;
+
+            if (is_region)
+            {
+                if (!World.Permissions.CanIssueEstateCommand(m_host.OwnerID, true))
+                    return ScriptBaseClass.ENV_NO_PERMISSIONS;
+
+                current = m_envModule.GetRegionEnvironment();
+            }
+            else
+            {
+                if (!World.RegionInfo.EstateSettings.AllowEnvironmentOverride)
+                    return ScriptBaseClass.ENV_NO_PERMISSIONS;
+
+                parcel = World.LandChannel.GetLandObject((float)position.x, (float)position.y);
+
+                if (!World.Permissions.CanEditParcelProperties(m_host.OwnerID, parcel, (GroupPowers.AllowEnvironment), true))
+                    return ScriptBaseClass.ENV_NO_PERMISSIONS;
+
+                current = parcel.LandData.Environment;
+            }
+
+            if(param_list.Length == 0)
+            {
+                current.Overrides.ClearOverrides();
+                goto Store;
+            }
+
+
+            bool success = ParamsToEnvUpdate(param_list, "llSetEnvironment", out var sky_edits, out var water_edits);
+
+            if (!success)
+            {
+                return ScriptBaseClass.ENV_INVALID_RULE;
+            }
+
+            int track_index = current.TrackIndex((float)position.z);
+
+            EEPOverrides.MergeOSDMaps(current.Overrides.Tracks[0], water_edits);
+
+            if(all_tracks)
+            {
+                for(int i = 1; i < 5; i++)
+                {
+                    EEPOverrides.MergeOSDMaps(current.Overrides.Tracks[i], sky_edits);
+                }
+            }
+            else if(track_index > 0)
+            {
+                EEPOverrides.MergeOSDMaps(current.Overrides.Tracks[track_index], sky_edits);
+            }
+
+            Store:
+
+            current.version++;
+
+            if(is_region)
+            {
+                m_envModule.StoreOnRegion(current);
+            }
+            else
+            {
+                parcel.StoreEnvironment(current);
+            }
+
+            return 1;
+        }
+
+        public LSL_Integer llReplaceEnvironment(LSL_Vector position, LSL_String environment, LSL_Integer track_no, LSL_Integer day_length, LSL_Integer day_offset)
+        {
+            bool is_region = position.x == -1 && position.y == -1;
+            bool all_tracks = track_no == -1;
+
+            ViewerEnvironment current;
+            ILandObject parcel = null;
+
+            if (is_region)
+            {
+                if (!World.Permissions.CanIssueEstateCommand(m_host.OwnerID, true))
+                    return ScriptBaseClass.ENV_NO_PERMISSIONS;
+
+                current = m_envModule.GetRegionEnvironment();
+            }
+            else
+            {
+                if (!World.RegionInfo.EstateSettings.AllowEnvironmentOverride)
+                    return ScriptBaseClass.ENV_NO_PERMISSIONS;
+
+                parcel = World.LandChannel.GetLandObject((float)position.x, (float)position.y);
+
+                if (!World.Permissions.CanEditParcelProperties(m_host.OwnerID, parcel, (GroupPowers.AllowEnvironment), true))
+                    return ScriptBaseClass.ENV_NO_PERMISSIONS;
+
+                current = parcel.LandData.Environment;
+            }
+
+
+            // Check the inventory first (some maniac may have named an item a uuid)
+            string item_name = string.Empty;
+            UUID item_asset_id = ScriptUtils.GetAssetIdFromItemName(m_host, environment, (int)AssetType.Settings);
+
+            if(item_asset_id.IsZero())
+            {
+                // Now check if it's an asset id
+                if (!UUID.TryParse(environment, out item_asset_id))
+                {
+                    return ScriptBaseClass.ENV_NO_ENVIRONMENT;
+                }
+            }
+            else item_name = environment;
+
+            AssetBase asset = World.AssetService.Get(item_asset_id.ToString());
+            if (asset is null || asset.Type != (byte)AssetType.Settings)
+            {
+                Error("llReplaceEnvironment", "Unable to load environment.");
+                return 1;
+            }
+
+            try
+            {
+                OSD oenv = OSDParser.Deserialize(asset.Data);
+                OSDMap map = (OSDMap)oenv;
+
+                var obj = EnvironmentData.ClassFromMap(map);
+
+                if(item_name == string.Empty)
+                    item_name = map["name"].AsString();
+
+                string type = map["type"].AsString();
+
+                if(type == "sky")
+                {
+                    current.replaceFromSkyData(obj as SkyData, track_no);
+                }
+                else if(type == "water")
+                {
+                    current.replaceWater(obj as WaterData);
+                }
+                else if(type == "daycycle")
+                {
+                    current.replaceFromDayCycle(obj as DayCycle, track_no, item_asset_id);
+                }
+
+                current.replaceTrackName(track_no, item_name);
+
+                current.version++;
+            }
+            catch
+            {
+                // I'm counting this as failing to the load the asset.
+                Error("llReplaceEnvironment", "Unable to load environment.");
+                return 1;
+            }
+
+            if(day_length != -1)
+            {
+                current.DayLength = Math.Clamp(day_length, 0, 604800);
+            }
+
+            if(day_offset != -1)
+            {
+                current.DayOffset = Math.Clamp(day_offset, 0, 43200);
+            }
+
+            current.InvalidateCaches();
+
+            if (is_region)
+            {
+                m_envModule.StoreOnRegion(current);
+            }
+            else
+            {
+                parcel.StoreEnvironment(current);
             }
 
             return 1;

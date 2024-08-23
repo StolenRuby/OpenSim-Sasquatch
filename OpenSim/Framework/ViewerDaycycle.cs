@@ -25,13 +25,15 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+using System;
 using System.Collections.Generic;
+using System.Linq;
 using OpenMetaverse;
 using OpenMetaverse.StructuredData;
 
 namespace OpenSim.Framework
 {
-    public class DayCycle
+    public class DayCycle : EnvironmentData
     {
         public struct TrackEntry
         {
@@ -56,7 +58,12 @@ namespace OpenSim.Framework
         public bool IsStaticDayCycle = false;
         public List<TrackEntry> waterTrack = new List<TrackEntry>();
         public List<TrackEntry> skyTrack0 = new List<TrackEntry>();
-        public List<TrackEntry>[] skyTracks = new List<TrackEntry>[3];
+        public List<TrackEntry>[] skyTracks = new List<TrackEntry>[3]
+        {
+            new List<TrackEntry>(),
+            new List<TrackEntry>(),
+            new List<TrackEntry>()
+        };
 
         public Dictionary<string, SkyData> skyframes = new Dictionary<string, SkyData>();
         public Dictionary<string, WaterData> waterframes = new Dictionary<string, WaterData>();
@@ -137,60 +144,155 @@ namespace OpenSim.Framework
                 array[3] = new OSDMap();
         }
 
-        public bool replaceWaterFromOSD(string name, OSDMap map)
+        public void ClearAllTracks(bool include_water = false)
         {
-            WaterData water = new WaterData();
-            if(string.IsNullOrWhiteSpace(name))
-                name = "Water";
-            try
-            {
-                water.FromOSD(name, map);
-            }
-            catch
-            {
-                return false;
-            }
-            waterframes.Clear();
-            waterframes[name] = water;
-            waterTrack.Clear();
-            TrackEntry t = new TrackEntry()
-            {
-                time = -1,
-                frameName = name
-            };
-            waterTrack.Add(t);
-            return true;
-        }
-
-        public bool replaceSkyFromOSD(string name, OSDMap map)
-        {
-            SkyData sky = new SkyData();
-            if (string.IsNullOrWhiteSpace(name))
-                name = "Sky";
-            try
-            {
-                sky.FromOSD(name, map);
-            }
-            catch
-            {
-                return false;
-            }
             skyframes.Clear();
-            skyframes[name] = sky;
 
-            TrackEntry t = new TrackEntry()
-            {
-                time = -1,
-                frameName = name
-            };
             skyTrack0.Clear();
-            skyTrack0.Add(t);
-            skyTracks = new List<TrackEntry>[3];
+            skyTracks[0].Clear();
+            skyTracks[1].Clear();
+            skyTracks[2].Clear();
+
+            if (include_water)
+            {
+                waterTrack.Clear();
+                waterframes.Clear();
+            }
+        }
+
+        void GatherNames(List<TrackEntry> entries, List<string> names)
+        {
+            foreach (var entry in entries)
+            {
+                if(!names.Contains(entry.frameName))
+                {
+                    names.Add(entry.frameName);
+                }
+            }
+        }
+
+        public void CleanseFrames()
+        {
+            List<string> water_track_names = new List<string>();
+            List<string> sky_track_names = new List<string>();
+
+            GatherNames(waterTrack, water_track_names);
+            GatherNames(skyTrack0, sky_track_names);
+            foreach (var list in skyTracks)
+                GatherNames(list, sky_track_names);
+
+            List<string> names_to_remove = new List<string>();
+
+            skyframes = skyframes.Where(pair => sky_track_names.Contains(pair.Key)).ToDictionary(pair => pair.Key, pair => pair.Value);
+            waterframes = waterframes.Where(pair => water_track_names.Contains(pair.Key)).ToDictionary(pair => pair.Key, pair => pair.Value);
+        }
+
+        string QuickFrameName()
+        {
+            return Random.Shared.NextInt64(99999999999999, 99999999999999999).ToString();
+        }
+
+        public bool replaceWater(WaterData water)
+        {
+            var track_entry = new TrackEntry
+            {
+                time = 0,
+                frameName = QuickFrameName()
+            };
+
+            waterTrack.Clear();
+            waterframes.Clear();
+
+            waterTrack.Add(track_entry);
+            waterframes[track_entry.frameName] = water;
 
             return true;
         }
 
-        public void FromOSD(OSDMap map)
+        public bool replaceFromSkyData(SkyData sky_data, int track)
+        {
+            var track_entry = new TrackEntry
+            {
+                time = 0,
+                frameName = QuickFrameName()
+            };
+
+            if (track == -1)
+            {
+                ClearAllTracks();
+                skyTrack0.Add(track_entry);
+            }
+            else if (track == 1)
+            {
+                skyTrack0.Clear();
+                skyTrack0.Add(track_entry);
+            }
+            else if (track > 1 && track < 5)
+            {
+                int index = track - 2;
+                skyTracks[index].Clear();
+                skyTracks[index].Add(track_entry);
+            }
+            else return false; // ignore 0, and anything higher than 4
+
+            skyframes[track_entry.frameName] = sky_data;
+            CleanseFrames();
+
+            return false;
+        }
+
+        public bool replaceFromDayCycle(DayCycle daycycle, int track)
+        {
+            Dictionary<string, SkyData> sky_frames = new Dictionary<string, SkyData>();
+
+            foreach(var track_entry in daycycle.skyTrack0)
+            {
+                if(daycycle.skyframes.ContainsKey(track_entry.frameName))
+                {
+                    var sky = daycycle.skyframes[track_entry.frameName];
+                    sky_frames[track_entry.frameName] = sky;
+                }
+            }
+
+            if (track == -1)
+            {
+                ClearAllTracks(true);
+
+                skyTrack0 = daycycle.skyTrack0;
+                skyframes = sky_frames;
+                waterTrack = daycycle.waterTrack;
+                waterframes = daycycle.waterframes;
+            }
+            else if (track == 0)
+            {
+                waterTrack = daycycle.waterTrack;
+                waterframes = daycycle.waterframes;
+            }
+            else if (track == 1)
+            {
+                skyTrack0 = daycycle.skyTrack0;
+
+                foreach (var pair in sky_frames)
+                    skyframes[pair.Key] = pair.Value;
+            }
+            else if (track < 5)
+            {
+                int index = track - 2;
+
+                skyTracks[index] = daycycle.skyTrack0;
+
+                foreach (var pair in sky_frames)
+                    skyframes[pair.Key] = pair.Value;
+
+            }
+            else return false;
+
+            CleanseFrames();
+
+            return true;
+        }
+
+        public override void FromOSD(OSDMap map)
         {
             CompareTrackEntries cte = new CompareTrackEntries();
             OSD otmp;
@@ -207,13 +309,13 @@ namespace OpenSim.Framework
                         if (type.Equals("water"))
                         {
                             WaterData water = new WaterData();
-                            water.FromOSD(kvp.Key, v);
+                            water.FromOSD(v);
                             waterframes[kvp.Key] = water;
                         }
                         else if (type.Equals("sky"))
                         {
                             SkyData sky = new SkyData();
-                            sky.FromOSD(kvp.Key, v);
+                            sky.FromOSD(v);
                             skyframes[kvp.Key] = sky;
                         }
                     }
@@ -223,7 +325,7 @@ namespace OpenSim.Framework
             if (map.TryGetValue("name", out otmp))
                 Name = otmp;
             else
-                Name ="DayCycle";
+                Name = "DayCycle";
 
             OSDArray track;
             if (map.TryGetValue("tracks", out otmp) && otmp is OSDArray)
@@ -304,18 +406,18 @@ namespace OpenSim.Framework
             }
         }
 
-        public OSDMap ToOSD()
+        public override OSDMap ToOSD(bool include_name = true)
         {
             OSDMap cycle = new OSDMap();
 
             OSDMap frames = new OSDMap();
             foreach (KeyValuePair<string, WaterData> kvp in waterframes)
             {
-                frames[kvp.Key] = kvp.Value.ToOSD();
+                frames[kvp.Key] = kvp.Value.ToOSD(include_name);
             }
             foreach (KeyValuePair<string, SkyData> kvp in skyframes)
             {
-                frames[kvp.Key] = kvp.Value.ToOSD();
+                frames[kvp.Key] = kvp.Value.ToOSD(include_name);
             }
             cycle["frames"] = frames;
 
@@ -375,7 +477,7 @@ namespace OpenSim.Framework
             return cycle;
         }
 
-        public void GatherAssets(Dictionary<UUID, sbyte> uuids)
+        public override void GatherAssets(Dictionary<UUID, sbyte> uuids)
         {
             foreach (WaterData wd in waterframes.Values)
             {

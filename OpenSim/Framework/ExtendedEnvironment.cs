@@ -105,4 +105,105 @@ namespace OpenSim.Framework
             return map;
         }
     }
+
+    public abstract class EnvironmentData
+    {
+        public abstract OSDMap ToOSD(bool include_name = true);
+        public abstract void FromOSD(OSDMap map);
+
+        public abstract void GatherAssets(Dictionary<UUID, sbyte> uuids);
+
+        public static EnvironmentData ClassFromMap(OSDMap map)
+        {
+            string type = map["type"];
+            EnvironmentData data = null;
+
+            try
+            {
+                switch (type)
+                {
+                    case "sky":
+                        {
+                            data = new SkyData();
+                            data.FromOSD(map);
+                            break;
+                        }
+                    case "water":
+                        {
+                            data = new WaterData();
+                            data.FromOSD(map);
+                            break;
+                        }
+                    case "daycycle":
+                        {
+                            data = new DayCycle();
+                            data.FromOSD(map);
+                            break;
+                        }
+                }
+            }
+            catch
+            {
+
+            }
+
+            return data;
+        }
+    }
+
+    public class EEPOverrides
+    {
+        public OSDMap[] Tracks =
+        [
+            new OSDMap(),
+            new OSDMap(),
+            new OSDMap(),
+            new OSDMap(),
+            new OSDMap()
+        ];
+
+        public OSDArray ToOSD()
+        {
+            var arr = new OSDArray();
+
+            foreach(var track in Tracks)
+            {
+                arr.Add(track);
+            }
+
+            return arr;
+        }
+
+        public void FromOSD(OSDArray arr)
+        {
+            for(int iter = 0; iter < arr.Count; iter++)
+            {
+                var track = arr[iter];
+                Tracks[iter] = track as OSDMap;
+            }
+        }
+
+        // I feel like this should exist alredy? perhaps it does?
+        public static void MergeOSDMaps(OSDMap original, OSDMap other)
+        {
+            foreach(var key in other.Keys)
+            {
+                var value = other[key];
+
+                if (value is OSDMap)
+                {
+                    var omap = original[key] as OSDMap;
+                    var map = value as OSDMap;
+                    MergeOSDMaps(omap, map);
+                }
+                else original[key] = value;
+            }
+        }
+
+        public void ClearOverrides()
+        {
+            foreach (var arr in Tracks)
+                arr.Clear();
+        }
+    }
 }

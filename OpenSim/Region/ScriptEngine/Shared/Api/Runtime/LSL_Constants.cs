@@ -1054,30 +1054,35 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
         public const int ENV_VALIDATION_FAIL = -6;
         public const int ENV_NO_EXPERIENCE_LAND = -7;
         public const int ENV_THROTTLE = -8;
+        public const int ENV_NO_PERMISSIONS = -9;
 
+        public const int SKY_AMBIENT = 0;
+        public const int SKY_TEXTURE_DEFAULTS = 1;
         public const int SKY_CLOUDS = 2;
-        public const int SKY_CLOUD_TEXTURE = 19;
         public const int SKY_DOME = 4;
         public const int SKY_GAMMA = 5;
         public const int SKY_GLOW = 6;
+        public const int SKY_LIGHT = 8;
         public const int SKY_MOON = 9;
-        public const int SKY_MOON_TEXTURE = 20;
-        public const int SKY_STAR_BRIGHTNESS = 13;
-        public const int SKY_SUN = 14;
-        public const int SKY_SUN_TEXTURE = 21;
         public const int SKY_PLANET = 10;
         public const int SKY_REFRACTION = 11;
-        public const int WATER_BLUR_MULTIPLIER = 100;
-        public const int WATER_FOG = 101;
-        public const int WATER_FRESNEL = 102;
-        public const int WATER_NORMAL_TEXTURE = 107;
-        public const int WATER_NORMAL_SCALE = 104;
-        public const int WATER_REFRACTION = 105;
-        public const int WATER_WAVE_DIRECTION = 106;
-        public const int SKY_AMBIENT = 0;
+        public const int SKY_STAR_BRIGHTNESS = 13;
+        public const int SKY_SUN = 14;
+        public const int SKY_TRACKS = 15;
+        public const int SKY_CLOUD_TEXTURE = 19;
+        public const int SKY_MOON_TEXTURE = 20;
+        public const int SKY_SUN_TEXTURE = 21;
         public const int SKY_BLUE = 22;
         public const int SKY_HAZE = 23;
         public const int SKY_REFLECTION_PROBE_AMBIANCE = 24;
+        public const int WATER_BLUR_MULTIPLIER = 100;
+        public const int WATER_FOG = 101;
+        public const int WATER_FRESNEL = 102;
+        public const int WATER_NORMAL_SCALE = 104;
+        public const int WATER_REFRACTION = 105;
+        public const int WATER_WAVE_DIRECTION = 106;
+        public const int WATER_NORMAL_TEXTURE = 107;
+        public const int ENVIRONMENT_DAYINFO = 200;
 
 
 
