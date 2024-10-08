@@ -197,10 +197,10 @@ namespace OpenSim.Framework.Capabilities
             m_capsHandlers[capName] = handler;
         }
 
-        public void RegisterSimpleHandler(string capName, ISimpleStreamHandler handler, bool addToListener = true)
+        public void RegisterSimpleHandler(string capName, ISimpleStreamHandler handler, bool addToListener = true, bool varpath = false)
         {
             //m_log.DebugFormat("[CAPS]: Registering handler for \"{0}\": path {1}", capName, handler.Path);
-            m_capsHandlers.AddSimpleHandler(capName, handler, addToListener);
+            m_capsHandlers.AddSimpleHandler(capName, handler, addToListener, varpath);
         }
 
         public void RegisterPollHandler(string capName, PollServiceEventArgs pollServiceHandler)

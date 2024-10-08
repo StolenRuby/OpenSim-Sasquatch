@@ -93,12 +93,12 @@ namespace OpenSim.Framework.Capabilities
             }
         }
 
-        public void AddSimpleHandler(string capName, ISimpleStreamHandler handler, bool addToListener = true)
+        public void AddSimpleHandler(string capName, ISimpleStreamHandler handler, bool addToListener = true, bool varpath = false)
         {
             if(ContainsCap(capName))
                 Remove(capName);
             if(m_capsSimpleHandlers.TryAdd(capName, handler) && addToListener)
-                m_httpListener.AddSimpleStreamHandler(handler);
+                m_httpListener.AddSimpleStreamHandler(handler, varpath);
         }
 
         public bool ContainsCap(string cap)
